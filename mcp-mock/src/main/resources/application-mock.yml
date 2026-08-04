@@ -1,0 +1,6 @@
+server:
+  port: ${SERVER_PORT:9091}
+
+spring:
+  application:
+    name: mcp-mock

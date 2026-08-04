@@ -1,0 +1,32 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: mcp-proxy
+  datasource:
+    url: ${JDBC_URL:jdbc:mysql://localhost:3306/mcpproxy?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true}
+    driver-class-name: ${JDBC_DRIVER:com.mysql.cj.jdbc.Driver}
+    username: ${JDBC_USER:root}
+    password: ${JDBC_PASSWORD:root}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+koophone:
+  validator-url: ${VALIDATOR_URL:http://localhost:9092}
+  mock:
+    phone-ip: ${MOCK_PHONE_IP:127.0.0.1}
+    mcp-port: ${MOCK_MCP_PORT:9091}
+
+mcp:
+  proxy-base-url: ${PROXY_BASE_URL:http://localhost:8080}
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:mcp-proxy-dev-secret-key-0123456789abcdef}
