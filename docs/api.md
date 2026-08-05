@@ -7,7 +7,7 @@
 
 | 分类 | 端点 | 鉴权 |
 |---|---|---|
-| 实例管理（华为兼容） | `/api/v1/instances/*` | 请求头 `x-auth-token`（10s 临时 token） |
+| Sandbox（Agent 实例入口） | `/api/v1/sandbox/create`、`/status`、`/kill` | 请求头 `x-auth-token`（10s 临时 token） |
 | 认证 | `/api/auth/login`、`/api/auth/exchange` | 无 |
 | MCP 代理 | `/mcp/{instanceId}`、`/sse`、`/ws` | `Authorization: Bearer <JWT>` |
 | Mock 校验服务 | `/api/token/issue`、`/api/validate/token` | 无 |
@@ -26,14 +26,20 @@
 
 ---
 
-## 2. 实例管理 API（gateway）
+## 2. Sandbox API（Agent 唯一可见的实例入口）
 
-### 2.1 订阅实例（CreateInstance）
+> 设计约束：华为风格实例管理接口（CreateInstance / BatchPrepareInstances / ShowProgress /
+> DeleteInstance / access-info）是 proxy 与云控制面之间的**内部 mock 接口，不对 Agent 暴露**。
+> Agent 只能调用以下三个 sandbox 接口（对齐阿里云 AgentBay sandbox 语义）。
 
-镜像华为 `POST /v1/instances/create`。
+### 2.1 create_sandbox（异步受理）
+
+真实华为云手机开通约 1~5 分钟，故 create 为**异步**：内部完成 CreateInstance + BatchPrepareInstances
+后立即返回，并启动后台看守线程轮询 ShowProgress（默认每 3s，最长 900s，均可配置）。
+请求体与华为 CreateInstance 相同。
 
 ```
-POST /api/v1/instances/create
+POST /api/v1/sandbox/create
 x-auth-token: <10s临时token>
 Content-Type: application/json
 ```
@@ -54,134 +60,85 @@ Content-Type: application/json
 }
 ```
 
-响应（200）：
+响应（200，立即返回）：
 
 ```json
 {
   "data": {
-    "orderId": "CS20260804A1B2C3D4",
-    "instanceInfos": [
-      { "instanceId": "Ab3xYz9p", "instanceName": "koophone-00001" }
-    ]
+    "sandbox_id": "Ab3xYz9p",
+    "instance_name": "koophone-00001",
+    "sandbox_status": "initializing"
   },
   "error_code": "0",
   "error_msg": "OK"
 }
 ```
 
-> `instanceId` 即 MCP URL 的一部分：`POST /mcp/{instanceId}`。
-> 订阅成功后实例信息与**访问方式**（access_method / mcp_url / backend_url / backend_token）持久化到 MySQL `t_cloud_phone_instance`。
+> `sandbox_id` 即 MCP URL 的一部分：`POST /mcp/{sandbox_id}`（ready 之后才可用）。
+> 创建过程的状态全部持久化到 MySQL，并镜像到 Redis 滚动缓存（30min，读命中续期）。
 
-### 2.2 查询实例信息（ListInstances，含访问方式）
+### 2.2 sandbox_status（轮询初始化进度）
 
 ```
-POST /api/v1/instances/list
+POST /api/v1/sandbox/status
 x-auth-token: <10s临时token>
 ```
 
-请求体：`{ "user_id": "user-10001", "instance_ids": ["Ab3xYz9p"] }`（`instance_ids` 可省略，省略查全部）
+请求体：`{ "sandbox_id": "Ab3xYz9p" }`
 
-响应（200）：
+响应（initializing）：
+
+```json
+{ "data": { "sandbox_id": "Ab3xYz9p", "sandbox_status": "initializing", "waiting_count": 2 },
+  "error_code": "0", "error_msg": "OK" }
+```
+
+响应（ready，可发起 MCP 请求）：
 
 ```json
 {
   "data": {
-    "instance_list": [
-      {
-        "instance_id": "Ab3xYz9p",
-        "instance_name": "koophone-00001",
-        "status": 2,
-        "access_method": "streamable-http",
-        "mcp_url": "http://localhost:8080/mcp/Ab3xYz9p",
-        "mcp_ip": "10.0.0.23",
-        "mcp_port": 9091,
-        "region_id": "cn-north-7",
-        "os": "AOSP14"
-      }
-    ]
+    "sandbox_id": "Ab3xYz9p",
+    "sandbox_status": "ready",
+    "healthy": true,
+    "mcp_url": "http://localhost:8080/mcp/Ab3xYz9p",
+    "mcp_ip": "10.0.0.23",
+    "mcp_port": 9091
   },
   "error_code": "0",
   "error_msg": "OK"
 }
 ```
 
-### 2.3 退订实例（DeleteInstance）
+响应（failed / timeout）：
+
+```json
+{ "data": { "sandbox_id": "Ab3xYz9p", "sandbox_status": "timeout" }, "error_code": "0", "error_msg": "OK" }
+```
+
+| sandbox_status | 含义 |
+|---|---|
+| `initializing` | 初始化中（含 waiting_count，继续轮询） |
+| `ready` | 就绪（healthz 判活通过，带 MCP 访问信息） |
+| `failed` | 初始化失败（healthz 判活未通过） |
+| `timeout` | 创建超时（后台看守线程超过 900s 未就绪） |
+
+### 2.3 kill_sandbox（退订释放）
 
 ```
-POST /api/v1/instances/delete
+POST /api/v1/sandbox/kill
 x-auth-token: <10s临时token>
 ```
 
-请求体：`{ "instanceIdList": ["Ab3xYz9p"] }`
+请求体：`{ "sandbox_id": "Ab3xYz9p" }`
 
 响应（200）：`{ "data": null, "error_code": "0", "error_msg": "OK" }`
 
-### 2.4 实例批量准备（BatchPrepareInstances）
-
-```
-POST /api/v1/instances/prepare
-x-auth-token: <10s临时token>
-```
-
-请求体：`{ "user_id": "user-10001", "instance_ids": ["Ab3xYz9p"] }`
-
-响应（200）：
-
-```json
-{
-  "data": { "status_list": [ { "instance_id": "Ab3xYz9p", "status": 1 } ] },
-  "error_code": "0",
-  "error_msg": "ok"
-}
-```
-
-### 2.5 实例准备进度（ShowProgress）
-
-```
-POST /api/v1/instances/prepare-progress
-x-auth-token: <10s临时token>
-```
-
-请求体：`{ "user_id": "user-10001", "instance_id": "Ab3xYz9p" }`
-
-响应（200）：
-
-```json
-{
-  "data": { "status": 1, "waitingCount": 2 },
-  "error_code": "0",
-  "error_msg": "OK"
-}
-```
-
-状态：`0` 正常（就绪）、`1` 排队中、`2` 还原中/离线、`3` 备份中、`-1` 处理失败。
-**Agent 循环轮询直到 `status == 0` 才可发起 MCP 请求。**
-就绪时 proxy 自动调用 E4 `fetchAccessInfo(instanceId)` 获取云机 IP/端口并落库（见 external-api.md）。
-
-### 2.6 查询云机访问信息（access-info）
-
-```
-POST /api/v1/instances/access-info
-x-auth-token: <10s临时token>
-```
-
-请求体：`{ "instance_id": "Ab3xYz9p" }`
-
-响应（200）：
-
-```json
-{
-  "data": { "instance_id": "Ab3xYz9p", "mcp_ip": "10.0.0.23", "mcp_port": 9091 },
-  "error_code": "0",
-  "error_msg": "OK"
-}
-```
-
-> 解析顺序：Redis 缓存（命中即续期 30min）→ MySQL → E4 接口获取并落库。
+> 逻辑删除（status=DELETED），同时清除 Redis 路由缓存与实例状态缓存。
 
 ---
 
-## 3. 认证 API（gateway）
+## 3. 认证 API（proxy）
 
 ### 3.1 登录（Login）：10s token → 30min JWT
 
@@ -220,7 +177,7 @@ Content-Type: application/json
 
 ---
 
-## 4. MCP 代理 API（gateway）
+## 4. MCP 代理 API（proxy）
 
 ### 4.1 streamable-http
 

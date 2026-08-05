@@ -88,6 +88,7 @@
 | `mcp_ip` | varchar(64) | 云手机 IP（E4 接口获取后落库） |
 | `mcp_port` | int | 云机内 MCP 服务端口（E4 接口获取后落库） |
 | `healthy` | tinyint(1) | 健康标记：就绪时 healthz 判活写入；活跃期每 30s 探活更新 |
+| `status_reason` | varchar(32) | 失败原因：healthz-failed / timeout（FAILED 时写入） |
 | `created_at` | datetime | 创建时间 |
 | `updated_at` | datetime | 更新时间 |
 
@@ -114,6 +115,7 @@ CREATE TABLE t_cloud_phone_instance (
   mcp_ip         VARCHAR(64),
   mcp_port       INT,
   healthy        TINYINT(1)   NOT NULL DEFAULT 0,
+  status_reason  VARCHAR(32),
   created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_uid (uid)
@@ -137,7 +139,20 @@ CREATE TABLE t_cloud_phone_instance (
 | 未命中顺序 | Redis → MySQL（有则回填缓存）→ E4 `fetchAccessInfo`（获取后落 MySQL + 写缓存） |
 | 失效 | 退订实例时主动 evict |
 
-### 3.4 连接配置
+### 3.4 Sandbox 门面与后台看守线程（v1.3）
+
+Agent 不可见华为风格实例管理接口（内部 mock：`MockKooPhoneClient` + `InstanceService`），
+只暴露三个 sandbox 接口（`/api/v1/sandbox/create|status|kill`）：
+
+| 环节 | 行为 |
+|---|---|
+| create_sandbox | 异步受理：create + prepare 后立即返回 initializing；同时启动**后台看守线程** |
+| 看守线程 | 每 `sandbox.progress-interval-ms`（默认 3000）轮询 ShowProgress；终态自毁；超 `sandbox.progress-timeout-ms`（默认 900000）置 FAILED(status_reason=timeout) 后自毁 |
+| sandbox_status | 纯读：Redis 实例状态滚动缓存（`mcp:instance:{id}`，30min，命中续期）→ MySQL 回源回填；返回 initializing/ready/failed/timeout |
+| kill_sandbox | 逻辑删除 + 双缓存（路由/状态）失效 |
+| 启动校准 | ApplicationRunner 扫描非 ready 且未退订实例：PREPARING 恢复看守线程；CREATED/FAILED 做一次 healthz 并更新状态（活 → 校准为 NORMAL） |
+
+### 3.5 连接配置
 
 | 环境 | 数据源 |
 |---|---|
@@ -179,6 +194,8 @@ CREATE TABLE t_cloud_phone_instance (
 | ADR-9 | 云手机 ≈ sandbox（对齐阿里云 AgentBay Mobile Use）：create/kill/get_sandbox_url 语义映射 CreateInstance/DeleteInstance/access-info |
 | ADR-10 | 健康闭环：就绪时 `healthz` 判活（死 → FAILED）；SSE/WS 长连接或 3min 内有 MCP 请求 → 每 30s 探活并更新 `healthy` |
 | ADR-11 | JWT 改 RS256：proxy 持私钥签发，每台云机 mcp-server 预置公钥验签；转发请求原样携带用户 JWT（见 security.md） |
+| ADR-12 | Sandbox 门面：实例管理不暴露给 Agent；create 异步 + 后台看守线程（3s/900s 可配）轮询 ShowProgress；状态持久化 MySQL + Redis 实例状态滚动缓存 |
+| ADR-13 | 启动校准：重启后扫描非 ready 未退订实例，PREPARING 恢复轮询线程，其余 healthz 检查后更新状态 |
 
 ## 7. 实例状态机（ASCII）
 

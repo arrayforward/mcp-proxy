@@ -235,6 +235,8 @@
 | MCP 三种传输 | McpBackendClientTest / WS 测试 | E2E HTTP + SSE + WS |
 | Mock 校验服务 | TokenControllerTest | E2E 间接覆盖 |
 | Mock MCP 服务 | McpMockServiceTest | E2E 间接覆盖 |
+| sandbox 创建（异步+看守线程）/状态轮询/退订 | SandboxWatcherTest（就绪退出/超时 markTimeout） | E2eFlowTest#createSandboxReady / deleteInstanceThenNotFound |
+| 启动校准（恢复轮询/healthz 校准） | StartupReconcilerTest | E2E 间接覆盖 |
 | access-info 落库 + Redis 缓存 | —（真实 MySQL/Redis） | E2eFlowTest#accessInfoPersistedToMysql |
 | JWT 签发/验签 | JwtServiceTest | E2E 全流程 |
 | healthz 判活 + 活跃期探活 | — | E2eFlowTest#healthzCheckKeepsInstanceAlive |

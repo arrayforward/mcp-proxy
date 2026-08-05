@@ -21,11 +21,15 @@
 
 | AgentBay sandbox 工具 | 本项目对应接口 | 语义 |
 |---|---|---|
-| `create_sandbox` | `POST /api/v1/instances/create`（CreateInstance） | 创建云手机沙箱，返回 instanceId（≈ sandbox_id） |
-| `get_sandbox_url` | `POST /api/v1/instances/access-info` | 获取云机访问地址（ip + mcp_port，即 MCP 运行时 URL） |
-| `kill_sandbox` | `POST /api/v1/instances/delete`（DeleteInstance） | 退订，释放云手机资源 |
+| `create_sandbox` | `POST /api/v1/sandbox/create` | 一键创建沙箱（**异步**：内部包装 CreateInstance + BatchPrepareInstances + 后台线程轮询 ShowProgress + healthz 判活），立即返回 sandbox_id + initializing |
+| （轮询） | `POST /api/v1/sandbox/status` | Agent 轮询初始化进度：initializing / ready（带 ip+port） / failed / timeout |
+| `get_sandbox_url` | `sandbox_status` 的 ready 响应 | 就绪时返回 mcp_url + mcp_ip + mcp_port（即 MCP 运行时地址） |
+| `kill_sandbox` | `POST /api/v1/sandbox/kill` | 退订，释放云手机资源（包装 DeleteInstance） |
 | `system_screenshot` | MCP `take_screenshot` 工具 | 截图（经 proxy 转发至云机 MCP） |
 | `shell` | MCP `adb_shell` 工具 | 云机通用 shell（经 proxy 转发） |
+
+> 约束：华为风格实例管理接口（create/list/delete/prepare/prepare-progress/access-info）为
+> proxy 与云控制面之间的**内部 mock 接口**（MockKooPhoneClient + InstanceService），**不对 Agent 暴露**。
 
 云机内 MCP（`mcp_mobile_use`）同时暴露 AgentBay 兼容工具集（click / input_text / send_key /
 get_all_ui_elements / get_clickable_ui_elements / get_installed_apps / start_app / stop_app_by_cmd），

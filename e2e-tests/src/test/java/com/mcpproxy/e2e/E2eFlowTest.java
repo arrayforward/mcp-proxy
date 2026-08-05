@@ -107,7 +107,9 @@ class E2eFlowTest {
                         "--koophone.validator-url=http://localhost:" + portOf(validatorApp),
                         "--koophone.mock.mcp-port=" + mockPort,
                         "--koophone.mock.phone-ip=127.0.0.1",
-                        "--security.jwt.private-key=" + privateKeyB64);
+                        "--security.jwt.private-key=" + privateKeyB64,
+                        "--sandbox.progress-interval-ms=100",
+                        "--sandbox.progress-timeout-ms=30000");
         validatorBase = "http://localhost:" + portOf(validatorApp);
         proxyBase = "http://localhost:" + portOf(proxyApp);
     }
@@ -134,9 +136,9 @@ class E2eFlowTest {
     @Test
     @Order(1)
     @SuppressWarnings("unchecked")
-    void createPrepareAndWaitReady() {
+    void createSandboxReady() {
         String token = issueToken(UID, "pending");
-        Map<?, ?> createResp = http.post().uri(proxyBase + "/api/v1/instances/create")
+        Map<?, ?> createResp = http.post().uri(proxyBase + "/api/v1/sandbox/create")
                 .header("x-auth-token", token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("os", "AOSP14", "instanceSkuId", "kp.professional.2xlarge.128g.2",
@@ -145,55 +147,37 @@ class E2eFlowTest {
                 .retrieve().body(Map.class);
         assertEquals("0", createResp.get("error_code"));
         Map<String, Object> data = (Map<String, Object>) createResp.get("data");
-        List<Map<String, Object>> infos = (List<Map<String, Object>>) data.get("instanceInfos");
-        instanceId = (String) infos.get(0).get("instanceId");
+        instanceId = (String) data.get("sandbox_id");
         assertNotNull(instanceId);
+        assertEquals("initializing", data.get("sandbox_status"), "create is async, returns immediately");
 
-        String prepareToken = issueToken(UID, instanceId);
-        Map<?, ?> prepareResp = http.post().uri(proxyBase + "/api/v1/instances/prepare")
-                .header("x-auth-token", prepareToken)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("user_id", UID, "instance_ids", List.of(instanceId)))
-                .retrieve().body(Map.class);
-        assertEquals("0", prepareResp.get("error_code"));
-
-        int status = -1;
-        for (int i = 0; i < 10 && status != 0; i++) {
-            String progressToken = issueToken(UID, instanceId);
-            Map<?, ?> progressResp = http.post().uri(proxyBase + "/api/v1/instances/prepare-progress")
-                    .header("x-auth-token", progressToken)
+        String status = "";
+        Map<String, Object> statusData = null;
+        for (int i = 0; i < 20 && !"ready".equals(status) && !"failed".equals(status); i++) {
+            Map<?, ?> statusResp = http.post().uri(proxyBase + "/api/v1/sandbox/status")
+                    .header("x-auth-token", issueToken(UID, instanceId))
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of("user_id", UID, "instance_id", instanceId))
+                    .body(Map.of("sandbox_id", instanceId))
                     .retrieve().body(Map.class);
-            Map<String, Object> progressData = (Map<String, Object>) progressResp.get("data");
-            status = ((Number) progressData.get("status")).intValue();
+            statusData = (Map<String, Object>) statusResp.get("data");
+            status = (String) statusData.get("sandbox_status");
         }
-        assertEquals(0, status);
+        assertEquals("ready", status, "sandbox should become ready after polling");
+        assertEquals("127.0.0.1", statusData.get("mcp_ip"), "E4 access info persisted via sandbox creation");
+        assertNotNull(statusData.get("mcp_port"));
+        assertEquals(Boolean.TRUE, statusData.get("healthy"), "healthz passed at ready time");
     }
 
     @Test
     @Order(2)
     @SuppressWarnings("unchecked")
     void accessInfoPersistedToMysql() {
-        String token = issueToken(UID, instanceId);
-        Map<?, ?> resp = http.post().uri(proxyBase + "/api/v1/instances/access-info")
-                .header("x-auth-token", token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("instance_id", instanceId))
-                .retrieve().body(Map.class);
-        Map<String, Object> data = (Map<String, Object>) resp.get("data");
-        assertEquals("127.0.0.1", data.get("mcp_ip"));
-        assertNotNull(data.get("mcp_port"));
-
-        Map<?, ?> listResp = http.post().uri(proxyBase + "/api/v1/instances/list")
-                .header("x-auth-token", issueToken(UID, instanceId))
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("user_id", UID, "instance_ids", List.of(instanceId)))
-                .retrieve().body(Map.class);
-        Map<String, Object> listData = (Map<String, Object>) listResp.get("data");
-        List<Map<String, Object>> list = (List<Map<String, Object>>) listData.get("instance_list");
-        assertEquals("127.0.0.1", list.get(0).get("mcp_ip"));
-        assertEquals(Boolean.TRUE, list.get(0).get("healthy"));
+        var repository = proxyApp.getBean(com.mcpproxy.proxy.instance.InstanceRepository.class);
+        var entity = repository.findById(instanceId).orElseThrow();
+        assertEquals("127.0.0.1", entity.getMcpIp());
+        assertNotNull(entity.getMcpPort());
+        assertTrue(entity.isHealthy());
+        assertEquals(com.mcpproxy.proxy.instance.InstanceStatus.NORMAL, entity.getStatus());
     }
 
     @Test
@@ -403,10 +387,10 @@ class E2eFlowTest {
     @Order(9)
     @SuppressWarnings("unchecked")
     void deleteInstanceThenNotFound() {
-        Map<?, ?> deleteResp = http.post().uri(proxyBase + "/api/v1/instances/delete")
+        Map<?, ?> deleteResp = http.post().uri(proxyBase + "/api/v1/sandbox/kill")
                 .header("x-auth-token", issueToken(UID, instanceId))
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("instanceIdList", List.of(instanceId)))
+                .body(Map.of("sandbox_id", instanceId))
                 .retrieve().body(Map.class);
         assertEquals("0", deleteResp.get("error_code"));
 

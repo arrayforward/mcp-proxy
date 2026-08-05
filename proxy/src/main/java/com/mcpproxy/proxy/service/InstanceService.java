@@ -5,6 +5,7 @@ import com.mcpproxy.proxy.client.McpBackendClient;
 import com.mcpproxy.proxy.instance.CloudPhoneInstance;
 import com.mcpproxy.proxy.instance.InstanceRepository;
 import com.mcpproxy.proxy.instance.InstanceStatus;
+import com.mcpproxy.proxy.route.InstanceCacheService;
 import com.mcpproxy.proxy.web.ApiException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -47,15 +48,18 @@ public class InstanceService {
     private final InstanceRepository repository;
     private final KooPhoneClient kooPhoneClient;
     private final McpBackendClient backendClient;
+    private final InstanceCacheService instanceCache;
     private final String proxyBaseUrl;
 
     public InstanceService(InstanceRepository repository,
                            KooPhoneClient kooPhoneClient,
                            McpBackendClient backendClient,
+                           InstanceCacheService instanceCache,
                            @Value("${mcp.proxy-base-url:http://localhost:8080}") String proxyBaseUrl) {
         this.repository = repository;
         this.kooPhoneClient = kooPhoneClient;
         this.backendClient = backendClient;
+        this.instanceCache = instanceCache;
         this.proxyBaseUrl = proxyBaseUrl;
     }
 
@@ -106,6 +110,7 @@ public class InstanceService {
             entity.setMcpUrl(proxyBaseUrl + "/mcp/" + entity.getInstanceId());
             entity.setBackendToken(UUID.randomUUID().toString());
             repository.save(entity);
+            instanceCache.put(entity);   // 状态镜像写入 Redis 滚动缓存（库为权威，缓存为镜像）
             instanceInfos.add(Map.of(
                     "instanceId", entity.getInstanceId(),
                     "instanceName", entity.getInstanceName()));
@@ -143,6 +148,7 @@ public class InstanceService {
             CloudPhoneInstance entity = requireOwner(uid, instanceId);
             entity.setStatus(InstanceStatus.DELETED);
             repository.save(entity);
+            instanceCache.evict(instanceId);   // 退订即失效缓存，防脏读
         }
     }
 
@@ -166,6 +172,7 @@ public class InstanceService {
                 entity.setStatus(InstanceStatus.PREPARING);
                 entity.setWaitingCount(PREPARE_WAITING_COUNT);
                 repository.save(entity);
+                instanceCache.put(entity);
             }
             statusList.add(Map.of("instance_id", instanceId, "status", huaweiStatus(entity)));
         }
@@ -199,8 +206,10 @@ public class InstanceService {
                 boolean alive = backendClient.healthCheck(entity.getBackendUrl());
                 entity.setHealthy(alive);
                 entity.setStatus(alive ? InstanceStatus.NORMAL : InstanceStatus.FAILED);
+                entity.setStatusReason(alive ? null : "healthz-failed");
             }
             repository.save(entity);
+            instanceCache.put(entity);   // 每次轮询推进的状态（含 waitingCount/healthy）同步缓存
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("status", huaweiStatus(entity));
@@ -215,6 +224,25 @@ public class InstanceService {
      *
      * @throws ApiException KOOPHONE.API.4001(404) / KOOPHONE.API.1001(403)
      */
+    /**
+     * 标记创建超时（SandboxService 后台看守线程超时分支调用）。
+     *
+     * <p>伪代码：requireOwner -> status=FAILED + status_reason=timeout + healthy=false
+     * -> 落库 + 缓存镜像，sandbox_status 据此返回 "timeout"。
+     */
+    @Transactional
+    public void markTimeout(String uid, String instanceId) {
+        CloudPhoneInstance entity = requireOwner(uid, instanceId);
+        if (entity.getStatus() == InstanceStatus.NORMAL || entity.getStatus() == InstanceStatus.DELETED) {
+            return;   // 已就绪或已退订，无需超时标记
+        }
+        entity.setStatus(InstanceStatus.FAILED);
+        entity.setStatusReason("timeout");
+        entity.setHealthy(false);
+        repository.save(entity);
+        instanceCache.put(entity);
+    }
+
     public CloudPhoneInstance requireOwner(String uid, String instanceId) {
         CloudPhoneInstance entity = repository.findById(instanceId)
                 .orElseThrow(() -> new ApiException(404, "KOOPHONE.API.4001", "instance not found: " + instanceId));

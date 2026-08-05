@@ -98,6 +98,10 @@ public class CloudPhoneInstance {
     @Column(name = "healthy", nullable = false)
     private boolean healthy;
 
+    /** 失败原因：healthz-failed / timeout（FAILED 时由 InstanceService/SandboxService 写入） */
+    @Column(name = "status_reason", length = 32)
+    private String statusReason;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -267,6 +271,14 @@ public class CloudPhoneInstance {
 
     public void setHealthy(boolean healthy) {
         this.healthy = healthy;
+    }
+
+    public String getStatusReason() {
+        return statusReason;
+    }
+
+    public void setStatusReason(String statusReason) {
+        this.statusReason = statusReason;
     }
 
     public LocalDateTime getCreatedAt() {
