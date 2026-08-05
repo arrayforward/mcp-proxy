@@ -1,0 +1,82 @@
+@startuml mcp-proxy-e2e-sequence
+!theme plain
+title mcp-proxy 端到端主流程时序图（订阅 → 就绪 → MCP 操控 → 退订）
+
+actor "用户 Agent" as agent
+participant "auth-validator\n(统一认证服务)" as validator
+participant "mcp-proxy\n(网关 :8080)" as proxy
+database "MySQL\nt_cloud_phone_instance" as mysql
+database "Redis\nmcp:route:{id}" as redis
+participant "云手机 mcp-server\n(mcp_mobile_use)" as phone
+
+== 1. 订阅与准备 ==
+agent -> validator: POST /api/token/issue {uid, instanceId}
+validator --> agent: tmp token（10s 有效）
+
+agent -> proxy: POST /api/v1/instances/create\n(x-auth-token)
+proxy -> validator: 校验临时 token
+validator --> proxy: {valid, uid, instanceId}
+proxy -> mysql: INSERT 实例（status=CREATED）
+mysql --> proxy: ok
+proxy --> agent: {orderId, instanceId}
+
+agent -> proxy: POST /api/v1/instances/prepare
+proxy -> mysql: UPDATE status=PREPARING, waitingCount=3
+proxy --> agent: {status_list}
+
+== 2. 轮询就绪 + 判活 ==
+loop 每隔几秒直到 status==0
+  agent -> proxy: POST /api/v1/instances/prepare-progress
+  proxy -> mysql: waitingCount--
+  alt waitingCount 归零
+    proxy -> proxy: fetchAccessInfo(instanceId)\n(E4 取 ip+mcp_port)
+    proxy -> mysql: UPDATE mcp_ip/mcp_port 落库
+    proxy -> phone: GET /healthz 判活
+    alt 2xx
+      proxy -> mysql: status=NORMAL, healthy=true
+    else 失败
+      proxy -> mysql: status=FAILED, healthy=false
+    end
+  end
+  proxy --> agent: {status, waitingCount}
+end
+
+== 3. 登录换 JWT ==
+agent -> proxy: POST /api/auth/login {token}
+proxy -> validator: 校验临时 token
+validator --> proxy: {valid, uid, instanceId}
+proxy --> agent: 30min JWT（RS256, uid+instanceId）
+
+== 4. MCP 代理（三传输同决策链） ==
+agent -> proxy: POST /mcp/{instanceId}\nAuthorization: Bearer JWT
+proxy -> proxy: 验签 + instanceId 比对 + 归属校验 + 就绪门控
+alt 校验通过
+  proxy -> redis: GET mcp:route:{id}
+  alt 缓存命中
+    redis --> proxy: ip:port（续期 30min）
+  else 未命中
+    proxy -> mysql: 查 mcp_ip/mcp_port（无则 E4 获取落库）
+    proxy -> redis: SET 缓存 TTL=30min
+  end
+  proxy -> phone: POST /mcp（携带同一用户 JWT）
+  phone -> phone: 预置公钥验签（RS256）
+  phone --> proxy: JSON-RPC 响应
+  proxy --> agent: 透传响应
+else 失败
+  proxy --> agent: 401 / 403 / 404 / 409
+end
+
+note over proxy, phone
+  活跃期探活：SSE/WS 长连接存续 或 3min 内有 MCP 请求
+  → 每 30s GET /healthz，更新 MySQL healthy
+end note
+
+== 5. 续期与退订 ==
+agent -> proxy: POST /api/auth/exchange {旧JWT}
+proxy --> agent: 新 30min JWT（同 uid/instanceId）
+
+agent -> proxy: POST /api/v1/instances/delete
+proxy -> mysql: UPDATE status=DELETED（逻辑删除）
+proxy -> redis: DEL mcp:route:{id}
+proxy --> agent: OK
+@enduml

@@ -1,7 +1,20 @@
 # 关键流程文档（Key Flows）
 
-> 版本：v1.1 ｜ 更新：2026-08-04
+> 版本：v1.2 ｜ 更新：2026-08-05
 > 重点：**登录流程**（10s 临时 token → 校验 → 30min JWT）
+
+## 0. 流程图（PlantUML 渲染，PNG）
+
+端到端时序图（订阅 → 就绪判活 → 登录 → MCP 代理 → 退订）：
+
+![端到端时序图](diagrams/mcp-proxy-e2e-sequence.png)
+
+业务活动图（云手机 sandbox 全生命周期 + 决策链 + 后台探活）：
+
+![业务活动图](diagrams/mcp-proxy-business-activity.png)
+
+> PlantUML 源码：`docs/diagrams/e2e-sequence.puml`、`docs/diagrams/business-activity.puml`。
+> 重新渲染：`java -jar plantuml.jar -tpng -charset UTF-8 docs/diagrams/*.puml`
 
 ## 1. 端到端主流程（ASCII 时序）
 

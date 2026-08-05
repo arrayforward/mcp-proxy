@@ -1,0 +1,75 @@
+@startuml mcp-proxy-business-activity
+!theme plain
+title mcp-proxy 业务活动图（云手机 sandbox 全生命周期）
+
+|用户 Agent|
+start
+:获取 10s 临时 token\n(E1 /api/token/issue);
+:订阅实例 CreateInstance;
+|mcp-proxy|
+:校验 token，INSERT 实例\nstatus=CREATED（MySQL）;
+:BatchPrepareInstances\nstatus=PREPARING, waitingCount=3;
+|用户 Agent|
+repeat
+  :轮询 ShowProgress;
+  |mcp-proxy|
+  :waitingCount--;
+repeat while (waitingCount > 0?) is (yes)
+
+:E4 fetchAccessInfo\n取云机 ip + mcp_port 落库;
+:GET /healthz 判活;
+if (healthz 2xx?) then ( alive )
+  :status=NORMAL\nhealthy=true;
+else ( dead )
+  :status=FAILED\nhealthy=false;
+  stop
+endif
+
+|用户 Agent|
+:login 换 30min JWT（RS256）;
+|mcp-proxy|
+:远程校验 token，私钥签发 JWT;
+|用户 Agent|
+repeat
+  :发起 MCP 请求\n（HTTP / SSE / WS 三选一）;
+  |mcp-proxy|
+  if (JWT 有效且 instanceId 匹配?) then ( no )
+    :401 / 403;
+    stop
+  else ( yes )
+  endif
+  if (实例就绪且归属本人?) then ( no )
+    :404 / 409;
+    stop
+  else ( yes )
+  endif
+  if (Redis 路由缓存命中?) then ( yes )
+    :续期 TTL=30min;
+  else ( no )
+    :读 MySQL（无则 E4 获取落库）\n回填缓存;
+  endif
+  :携带用户 JWT 转发云机;
+  |云手机 mcp-server|
+  :预置公钥验签;
+  :执行工具（tap/adb_shell/...）;
+  |mcp-proxy|
+  :透传响应;
+  |用户 Agent|
+  if (任务完成?) then ( no )
+  else ( yes )
+  endif
+repeat while (继续操控?) is (yes) not (no)
+
+|mcp-proxy|
+note right
+  并行后台任务：每 30s 对活跃实例
+  （长连接存续或 3min 内有请求）
+  调 healthz，更新 healthy
+end note
+
+|用户 Agent|
+:DeleteInstance 退订;
+|mcp-proxy|
+:status=DELETED（逻辑删除）\n清除 Redis 路由缓存;
+stop
+@enduml
