@@ -186,11 +186,59 @@ public class SandboxService {
     }
 
     /**
+     * list_sandbox：列出当前用户的全部沙箱（语义化状态视图）。
+     *
+     * <p>用途：Agent 一屏看清自己有哪些沙箱、各自处于什么状态，
+     * 再决定对某一个调 sandbox_status 轮询或 kill_sandbox 杀死。
+     *
+     * <p>伪代码：listEntities(uid)（过滤已退订）-> 逐个语义化映射（与 sandboxStatus 同一套规则）。
+     *
+     * @return {sandboxes: [...]}，每项含 sandbox_id/instance_name/sandbox_status/healthy/
+     *         ready 时带 mcp 访问信息，initializing 带 waiting_count，failed 带 status_reason
+     */
+    public Map<String, Object> listSandboxes(String uid) {
+        List<Map<String, Object>> sandboxes = instanceService.listEntities(uid).stream()
+                .map(this::toSandboxView)
+                .toList();
+        return Map.of("sandboxes", sandboxes);
+    }
+
+    /**
      * kill_sandbox：关闭并释放云手机沙箱（包装 DeleteInstance）。
      *
      * <p>伪代码：requireOwner -> 置 DELETED + 缓存失效；路由缓存由 Controller 清除。
      */
     public void killSandbox(String uid, String sandboxId) {
         instanceService.delete(uid, List.of(sandboxId));
+    }
+
+    /**
+     * 实体 -> 语义化沙箱视图（sandboxStatus 与 listSandboxes 共用的状态映射规则）。
+     *
+     * <p>映射：NORMAL -> ready（带 mcp 访问信息）；FAILED -> timeout/failed（按 status_reason）；
+     * 其余 -> initializing（带 waiting_count）。
+     */
+    private Map<String, Object> toSandboxView(CloudPhoneInstance entity) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("sandbox_id", entity.getInstanceId());
+        view.put("instance_name", entity.getInstanceName());
+        switch (entity.getStatus()) {
+            case InstanceStatus.NORMAL -> {
+                view.put("sandbox_status", "ready");
+                view.put("healthy", entity.isHealthy());
+                view.put("mcp_url", entity.getMcpUrl());
+                view.put("mcp_ip", entity.getMcpIp());
+                view.put("mcp_port", entity.getMcpPort());
+            }
+            case InstanceStatus.FAILED -> {
+                view.put("sandbox_status", "timeout".equals(entity.getStatusReason()) ? "timeout" : "failed");
+                view.put("status_reason", entity.getStatusReason());
+            }
+            default -> {
+                view.put("sandbox_status", "initializing");
+                view.put("waiting_count", entity.getWaitingCount());
+            }
+        }
+        return view;
     }
 }

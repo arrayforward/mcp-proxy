@@ -1,0 +1,38 @@
+@startuml mcp-proxy-health-loop
+!theme plain
+title 健康检查闭环 + 启动校准
+
+start
+:系统启动;
+:StartupReconciler 扫描实例表;
+if (非 ready 且未退订?) then (PREPARING)
+  :恢复后台看守线程\n（继续 3s 轮询 ShowProgress）;
+elseif (CREATED/FAILED 有云机地址?) then (其它)
+  :healthz 检查一次;
+  if (alive?) then (yes)
+    :校准 status=NORMAL\nhealthy=true;
+  else (no)
+    :healthy=false;
+  endif
+endif
+
+partition "运行期：每 30s（@Scheduled）" {
+  :遍历 status==NORMAL 实例;
+  if (活跃?（SSE/WS 长连接>0\n或 3min 内有 MCP 请求）) then (yes)
+    :GET http://ip:port/healthz;
+    if (2xx?) then (yes)
+      :healthy=true;
+    else (no/超时)
+      :healthy=false;
+    endif
+    if (healthy 变化?) then (yes)
+      :UPDATE MySQL + 缓存镜像;
+    else (no)
+      :跳过写库;
+    endif
+  else (no)
+    :跳过（冷实例零开销）;
+  endif
+}
+stop
+@enduml

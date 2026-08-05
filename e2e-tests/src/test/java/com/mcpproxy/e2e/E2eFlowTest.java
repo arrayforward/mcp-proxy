@@ -77,6 +77,8 @@ class E2eFlowTest {
 
     private String instanceId;
     private String jwt;
+    /** sandbox 操作用的用户级 JWT（instanceId 占位，sandbox 接口只认 uid） */
+    private String userJwt;
 
     private String mockBase;
 
@@ -133,13 +135,21 @@ class E2eFlowTest {
         return (String) resp.get("token");
     }
 
+    private String loginUserJwt() {
+        Map<?, ?> loginResp = http.post().uri(proxyBase + "/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("token", issueToken(UID, "pending")))
+                .retrieve().body(Map.class);
+        return (String) loginResp.get("accessToken");
+    }
+
     @Test
     @Order(1)
     @SuppressWarnings("unchecked")
-    void createSandboxReady() {
-        String token = issueToken(UID, "pending");
+    void createSandboxReady() throws Exception {
+        userJwt = loginUserJwt();
         Map<?, ?> createResp = http.post().uri(proxyBase + "/api/v1/sandbox/create")
-                .header("x-auth-token", token)
+                .header("Authorization", "Bearer " + userJwt)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("os", "AOSP14", "instanceSkuId", "kp.professional.2xlarge.128g.2",
                         "bandSkuId", "kp.bandwidth", "regionId", "cn-north-7",
@@ -153,14 +163,17 @@ class E2eFlowTest {
 
         String status = "";
         Map<String, Object> statusData = null;
-        for (int i = 0; i < 20 && !"ready".equals(status) && !"failed".equals(status); i++) {
+        for (int i = 0; i < 60 && !"ready".equals(status) && !"failed".equals(status); i++) {
             Map<?, ?> statusResp = http.post().uri(proxyBase + "/api/v1/sandbox/status")
-                    .header("x-auth-token", issueToken(UID, instanceId))
+                    .header("Authorization", "Bearer " + userJwt)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("sandbox_id", instanceId))
                     .retrieve().body(Map.class);
             statusData = (Map<String, Object>) statusResp.get("data");
             status = (String) statusData.get("sandbox_status");
+            if (!"ready".equals(status)) {
+                Thread.sleep(100);
+            }
         }
         assertEquals("ready", status, "sandbox should become ready after polling");
         assertEquals("127.0.0.1", statusData.get("mcp_ip"), "E4 access info persisted via sandbox creation");
@@ -386,9 +399,44 @@ class E2eFlowTest {
     @Test
     @Order(9)
     @SuppressWarnings("unchecked")
+    void listSandboxesThenKillOne() {
+        Map<?, ?> createResp = http.post().uri(proxyBase + "/api/v1/sandbox/create")
+                .header("Authorization", "Bearer " + userJwt)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("os", "AOSP14", "instanceSkuId", "kp.professional.2xlarge.128g.2",
+                        "bandSkuId", "kp.bandwidth", "regionId", "cn-north-7", "count", 1))
+                .retrieve().body(Map.class);
+        String secondId = (String) ((Map<String, Object>) createResp.get("data")).get("sandbox_id");
+
+        Map<?, ?> listResp = http.post().uri(proxyBase + "/api/v1/sandbox/list")
+                .header("Authorization", "Bearer " + userJwt)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of())
+                .retrieve().body(Map.class);
+        List<Map<String, Object>> sandboxes =
+                (List<Map<String, Object>>) ((Map<String, Object>) listResp.get("data")).get("sandboxes");
+        assertTrue(sandboxes.size() >= 2, "should list both sandboxes");
+        Map<String, Object> second = sandboxes.stream()
+                .filter(s -> secondId.equals(s.get("sandbox_id"))).findFirst().orElseThrow();
+        assertEquals("initializing", second.get("sandbox_status"));
+        Map<String, Object> first = sandboxes.stream()
+                .filter(s -> instanceId.equals(s.get("sandbox_id"))).findFirst().orElseThrow();
+        assertEquals("ready", first.get("sandbox_status"));
+
+        Map<?, ?> killResp = http.post().uri(proxyBase + "/api/v1/sandbox/kill")
+                .header("Authorization", "Bearer " + userJwt)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("sandbox_id", secondId))
+                .retrieve().body(Map.class);
+        assertEquals("0", killResp.get("error_code"));
+    }
+
+    @Test
+    @Order(10)
+    @SuppressWarnings("unchecked")
     void deleteInstanceThenNotFound() {
         Map<?, ?> deleteResp = http.post().uri(proxyBase + "/api/v1/sandbox/kill")
-                .header("x-auth-token", issueToken(UID, instanceId))
+                .header("Authorization", "Bearer " + userJwt)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("sandbox_id", instanceId))
                 .retrieve().body(Map.class);

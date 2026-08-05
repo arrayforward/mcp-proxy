@@ -1,0 +1,61 @@
+@startuml mcp-proxy-arch-overview
+!theme plain
+title mcp-proxy 总体架构（部署/组件视图）
+
+actor "用户 Agent\n(MCP 客户端)" as agent
+
+cloud "统一认证服务" as auth {
+  [auth-validator-mock :9092\n/api/token/issue\n/api/validate/token]
+}
+
+node "mcp-proxy :8080" {
+  [SandboxController\n/api/v1/sandbox/*] as sandboxCtrl
+  [AuthController\n/api/auth/login|exchange] as authCtrl
+  [McpProxyController\n/mcp/{id} /sse /message] as mcpCtrl
+  [McpWebSocketHandler\n/ws/mcp/{id}] as wsCtrl
+  [JwtAuthFilter + JwtService\nRS256 私钥签发] as jwt
+  [SandboxService\n后台看守线程 3s/900s] as sandboxSvc
+  [InstanceService\n状态机编排] as instSvc
+  [RouteService\n三级路由解析] as routeSvc
+  [HealthCheckService\n30s 探活] as healthSvc
+  [StartupReconciler\n启动校准] as reconciler
+  [MockKooPhoneClient\n华为控制面 Mock] as koophone
+  [HttpMcpBackendClient\n转发+携带JWT] as backend
+}
+
+database "MySQL 8.0" as mysql {
+  [t_cloud_phone_instance\n注册表+访问方式+状态+healthy]
+}
+database "Redis" as redis {
+  [mcp:route:{id}\n路由缓存 30min 滑动]
+  [mcp:instance:{id}\n状态缓存 30min 滑动]
+}
+
+cloud "云手机池" as phones {
+  [云手机1\nmcp_mobile_use\n公钥验签] as phone1
+  [云手机2\nmcp_mobile_use\n公钥验签] as phone2
+}
+
+agent --> sandboxCtrl : Bearer JWT\nsandbox create/status/list/kill
+agent --> authCtrl : 10s token 换 30min JWT
+agent --> mcpCtrl : Bearer JWT + JSON-RPC
+agent --> wsCtrl : ws + ?token=JWT
+authCtrl --> auth : 校验临时 token
+sandboxCtrl --> sandboxSvc
+sandboxSvc --> instSvc
+instSvc --> koophone : create/prepare/progress/delete（内部 mock）
+instSvc --> mysql : JPA 落库
+instSvc --> redis : 状态镜像
+routeSvc --> redis : 命中续期
+routeSvc --> mysql : 回源
+mcpCtrl --> jwt : 验签
+mcpCtrl --> routeSvc
+mcpCtrl --> backend
+wsCtrl --> backend
+backend --> phone1 : 携带用户 JWT
+backend --> phone2
+healthSvc --> phone1 : GET /healthz（30s）
+healthSvc --> mysql : 回写 healthy
+reconciler --> mysql : 启动扫描非 ready 实例
+reconciler --> sandboxSvc : 恢复 watcher
+@enduml

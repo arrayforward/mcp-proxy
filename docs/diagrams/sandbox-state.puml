@@ -1,0 +1,39 @@
+@startuml mcp-proxy-sandbox-state
+!theme plain
+title Sandbox 状态机（内部实例状态 ↔ Agent 语义状态）
+
+state "CREATED\n已创建未准备" as created
+state "PREPARING\n准备中 waitingCount--" as preparing
+state "NORMAL\n就绪（healthz 通过）" as normal
+state "FAILED\n失败" as failed
+state "DELETED\n已退订（逻辑删除）" as deleted
+
+[*] --> created : create_sandbox 受理\n（异步，启动看守线程）
+created --> preparing : prepare\nwaitingCount=3
+preparing --> normal : 看守线程轮询 ShowProgress\n归零 + E4 落库 + healthz 判活通过
+preparing --> failed : healthz 判活未通过\nstatus_reason=healthz-failed
+preparing --> failed : 超过 900s 未就绪\nstatus_reason=timeout
+failed --> preparing : 重新 prepare
+normal --> deleted : kill_sandbox
+created --> deleted : kill_sandbox
+preparing --> deleted : kill_sandbox
+failed --> deleted : kill_sandbox
+deleted --> [*]
+
+note right of normal
+  Agent 语义：ready
+  healthy=true（30s 探活持续更新）
+  可发起 MCP 请求
+end note
+note right of preparing
+  Agent 语义：initializing
+  带 waiting_count
+end note
+note right of failed
+  Agent 语义：failed / timeout
+  按 status_reason 区分
+end note
+note right of created
+  Agent 语义：initializing
+end note
+@enduml

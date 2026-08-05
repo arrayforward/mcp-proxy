@@ -1,0 +1,37 @@
+@startuml mcp-proxy-security-keys
+!theme plain
+title 安全密钥体系（RS256 非对称信任链）
+
+package "mcp-proxy（信任锚）" {
+  [RSA 私钥\n仅 proxy 持有\n签发用户 JWT] as priv
+  [RSA 公钥\n自身验签] as pub1
+}
+package "云手机 1" {
+  [RSA 公钥\n预置/镜像分发\nmcp-server 验签] as pub2
+}
+package "云手机 2" {
+  [RSA 公钥\n预置/镜像分发\nmcp-server 验签] as pub3
+}
+package "统一认证服务" {
+  [10s 临时 token\n签发+校验] as tmp
+}
+
+priv ..> pub1 : 成对
+priv ..> pub2 : 成对（同一份公钥）
+priv ..> pub3 : 成对（同一份公钥）
+
+actor "Agent" as agent
+agent --> tmp : ① 获取 10s token
+agent --> priv : ② login 换 30min JWT（RS256 私钥签发）
+agent --> pub2 : ③ MCP 请求经 proxy 转发携带同一 JWT
+note right of pub2 : ④ 公钥验签通过 → 放行\n失败/过期 → 401
+
+note bottom of priv
+  私钥泄露 = 可伪造任意令牌
+  → 仅存 proxy（KMS/环境变量），不入库不入日志
+end note
+note bottom of pub2
+  公钥公开，可随镜像预置
+  云机被攻破也无法伪造令牌
+end note
+@enduml

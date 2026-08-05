@@ -13,9 +13,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 /**
  * Spring Security 配置。
  *
- * <p>功能：定义网关的授权规则——只有 /mcp/**（MCP 代理三传输入口）要求认证，
- * 其余（实例管理 API、登录、swagger、WS 握手）放行但各自有独立鉴权逻辑：
- * 实例 API 靠 x-auth-token 远程校验，WS 握手在 Handler 内自验 JWT。
+ * <p>功能：定义网关的授权规则——/mcp/**（MCP 代理三传输入口）与 /api/v1/sandbox/**
+ * （Agent 沙箱入口）要求 Bearer JWT 认证；其余（登录、swagger、WS 握手）放行但各自有
+ * 独立鉴权逻辑（WS 握手在 Handler 内自验 JWT）。
  *
  * <p>开发思路：
  * <ul>
@@ -48,7 +48,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(registry -> registry
-                        .requestMatchers("/mcp/**").authenticated()
+                        .requestMatchers("/mcp/**", "/api/v1/sandbox/**").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(handling -> handling.authenticationEntryPoint(
                         (request, response, exception) -> response.sendError(HttpServletResponse.SC_UNAUTHORIZED)))

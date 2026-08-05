@@ -125,6 +125,18 @@ public class InstanceService {
      *
      * @param instanceIds 为空则查该用户全部实例
      */
+    /**
+     * 查询某用户的全部实例实体（未退订），供 SandboxService 组装语义化视图。
+     *
+     * @return 未退订的实例实体列表
+     */
+    @Transactional(readOnly = true)
+    public List<CloudPhoneInstance> listEntities(String uid) {
+        return repository.findByUid(uid).stream()
+                .filter(e -> e.getStatus() != InstanceStatus.DELETED)
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public List<Map<String, Object>> list(String uid, List<String> instanceIds) {
         List<CloudPhoneInstance> entities = instanceIds == null || instanceIds.isEmpty()

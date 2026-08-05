@@ -1,0 +1,40 @@
+@startuml mcp-proxy-external-systems
+!theme plain
+title 外部系统与组件关系图（mcp-proxy 生态全景）
+
+actor "用户 Agent\n(Claude / opencode / LLM)" as agent
+
+frame "外部系统（本项目依赖，详见 external-api.md）" {
+  [统一认证服务\nE1 签发 10s token\nE2 校验 token] as authSys
+  [华为云 KooPhone 控制面\nE3 实例订购类 API\nE4 fetchAccessInfo] as koophoneSys
+  [华为云 KooPhone 资源池\n云手机实例 1..N] as pool
+}
+
+frame "本项目（mcp-proxy 仓库）" {
+  [proxy :8080\n统一网关\nsandbox API + 认证 + MCP 代理\nJWT 签发 + 路由缓存 + 健康检查] as proxy
+  [mcp-mock :9091\n模拟云机 mcp-server\n26 工具 + healthz + 公钥验签] as mock
+  [auth-validator-mock :9092\n模拟统一认证服务] as validatorMock
+  [e2e-tests\n全流程测试] as e2e
+}
+
+frame "云手机（生产环境每台一个）" {
+  [mcp-server (mcp_mobile_use)\n12+1 操控工具 + adb_shell\n/sse /message /mcp /healthz\n预置公钥验签] as mcpServer
+}
+
+database "MySQL 8.0\n实例注册表（权威）" as mysql
+database "Redis\n路由/状态滚动缓存" as redis
+
+agent --> proxy : ① sandbox API（Bearer JWT）\n② /api/auth/login\n③ MCP 三传输
+proxy --> authSys : 校验 10s token（生产）
+proxy --> validatorMock : 校验 10s token（当前 mock）
+proxy --> koophoneSys : 实例 create/prepare/progress/delete\nfetchAccessInfo（生产）
+proxy ..> mock : （当前 mock 代替控制面+云机）
+proxy --> mcpServer : 转发 JSON-RPC（携带用户 JWT）\nGET /healthz 探活
+mcpServer ..|> pool : 运行在云手机内
+koophoneSys ..> pool : 开通/回收
+proxy --> mysql : JPA
+proxy --> redis : 读写+续期
+e2e ..> proxy : 启动三应用全流程验证
+e2e ..> mysql : 真实库断言
+e2e ..> redis : 真实缓存
+@enduml

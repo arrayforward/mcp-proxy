@@ -1,0 +1,38 @@
+@startuml mcp-proxy-cache-data
+!theme plain
+title 数据与缓存架构（MySQL 权威 + Redis 双层滚动缓存）
+
+participant "RouteService\nresolveRoute" as route
+participant "InstanceService\n状态变更" as svc
+database "Redis\nmcp:route:{id}\nip:port" as redisRoute
+database "Redis\nmcp:instance:{id}\nstatus|healthy|wc|ip|port" as redisInst
+database "MySQL\nt_cloud_phone_instance\n（权威存储）" as mysql
+participant "KooPhoneClient\nE4 fetchAccessInfo" as e4
+
+== 读路径（MCP 转发 / sandbox_status） ==
+route -> redisRoute : GET（命中 → 续期 30min）
+alt 命中
+  redisRoute --> route : ip:port
+else 未命中
+  route -> mysql : SELECT
+  alt 库中有 ip/port
+    mysql --> route : entity
+    route -> redisRoute : SET 回填 TTL=30min
+  else 库中无
+    route -> e4 : fetchAccessInfo(instanceId)
+    e4 --> route : ip + mcpPort
+    route -> mysql : UPDATE 落库
+    route -> redisRoute : SET 回填
+  end
+end
+
+== 写路径（状态变更：create/prepare/progress/delete） ==
+svc -> mysql : save（事务提交，权威）
+svc -> redisInst : put 状态镜像 TTL=30min
+note right
+  读命中即续期（滚动/sliding）：
+  活跃实例缓存永不过期
+end note
+svc -> redisInst : delete 时 evict
+svc -> redisRoute : kill 时 evict
+@enduml

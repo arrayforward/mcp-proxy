@@ -1,0 +1,34 @@
+@startuml mcp-proxy-transports
+!theme plain
+title MCP 三种传输代理时序（统一决策链）
+
+actor "用户 Agent" as agent
+participant "mcp-proxy" as proxy
+participant "云手机 mcp-server" as phone
+
+== streamable-http ==
+agent -> proxy : POST /mcp/{id}\nBearer JWT + JSON-RPC
+proxy -> proxy : 决策链：验签→403/归属→404/门控→409
+proxy -> phone : POST /mcp（携带同一 JWT）
+phone --> proxy : JSON 响应（通知类 202）
+proxy --> agent : 透传
+
+== SSE ==
+agent -> proxy : GET /mcp/{id}/sse
+proxy -> phone : GET /sse（JWT）
+phone --> proxy : event:endpoint\ndata:/message?sessionId=abc
+proxy --> agent : event:endpoint（重写）\ndata:/mcp/{id}/message?sessionId=abc
+agent -> proxy : POST /mcp/{id}/message?sessionId=abc
+proxy -> phone : POST /message?sessionId=abc（JWT）
+phone --> proxy : 202
+phone --> proxy : event:message（响应）
+proxy --> agent : event:message 透传
+
+== WebSocket ==
+agent -> proxy : WS /ws/mcp/{id}?token=JWT
+proxy -> proxy : 握手时验签+比对+门控\n（失败 POLICY_VIOLATION 关闭）
+agent -> proxy : 文本帧 JSON-RPC
+proxy -> phone : POST /mcp（JWT 桥接为 HTTP）
+phone --> proxy : JSON 响应
+proxy --> agent : 文本帧回推
+@enduml
