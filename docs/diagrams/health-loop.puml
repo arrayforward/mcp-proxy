@@ -1,5 +1,6 @@
 @startuml mcp-proxy-health-loop
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title 健康检查闭环 + 启动校准
 
 start

@@ -1,5 +1,6 @@
 @startuml mcp-proxy-external-systems
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title 外部系统与组件关系图（mcp-proxy 生态全景）
 
 actor "用户 Agent\n(Claude / opencode / LLM)" as agent

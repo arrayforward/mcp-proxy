@@ -1,5 +1,6 @@
 @startuml mcp-proxy-cache-data
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title 数据与缓存架构（MySQL 权威 + Redis 双层滚动缓存）
 
 participant "RouteService\nresolveRoute" as route

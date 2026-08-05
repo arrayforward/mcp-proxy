@@ -1,5 +1,6 @@
 @startuml mcp-proxy-e2e-sequence
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title mcp-proxy 端到端主流程时序图（订阅 → 就绪 → MCP 操控 → 退订）
 
 actor "用户 Agent" as agent

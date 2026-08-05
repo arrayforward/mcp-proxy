@@ -1,5 +1,6 @@
 @startuml mcp-proxy-security-keys
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title 安全密钥体系（RS256 非对称信任链）
 
 package "mcp-proxy（信任锚）" {

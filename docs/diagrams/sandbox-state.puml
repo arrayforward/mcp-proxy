@@ -1,5 +1,6 @@
 @startuml mcp-proxy-sandbox-state
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title Sandbox 状态机（内部实例状态 ↔ Agent 语义状态）
 
 state "CREATED\n已创建未准备" as created

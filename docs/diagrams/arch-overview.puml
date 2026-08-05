@@ -1,5 +1,6 @@
 @startuml mcp-proxy-arch-overview
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title mcp-proxy 总体架构（部署/组件视图）
 
 actor "用户 Agent\n(MCP 客户端)" as agent

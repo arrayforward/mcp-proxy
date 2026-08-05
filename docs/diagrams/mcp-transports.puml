@@ -1,5 +1,6 @@
 @startuml mcp-proxy-transports
 !theme plain
+skinparam defaultFontName "Microsoft YaHei"
 title MCP 三种传输代理时序（统一决策链）
 
 actor "用户 Agent" as agent
