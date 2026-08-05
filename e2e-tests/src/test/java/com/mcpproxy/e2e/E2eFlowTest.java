@@ -36,6 +36,29 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * 端到端全流程测试：真实本地 MySQL 8.0 + Redis 5.0 上跑通完整生命周期。
+ *
+ * <p>覆盖路径（按 @Order 顺序）：
+ * <pre>
+ *   1. 订阅 create -> 准备 prepare -> 轮询 prepare-progress 直到就绪
+ *   2. access-info 取 ip/port 并断言落 MySQL（含 healthy 标记）
+ *   3. 登录 login -> streamable-http MCP（initialize/tools/list 26 个/tools/call）
+ *      + healthz 探活 + sandbox/adb_shell 工具透传 + 云机无 JWT 拒绝（401）
+ *   4. exchange 续期
+ *   5. SSE 会话（endpoint 重写 + message 回推）
+ *   6. WebSocket 桥接
+ *   7-8. 越权 403 / 无 token 401
+ *   9. 退订 delete -> 再访问 404
+ * </pre>
+ *
+ * <p>开发思路：三个 Spring 应用同 JVM 启动（随机端口 + profile 隔离配置），
+ * 动态生成 RSA-2048 密钥对分别注入 proxy（私钥）与 mcp-mock（公钥），
+ * 还原"proxy 签发、云机验签"的生产形态。
+ *
+ * @author hubin
+ * @since 2026-08-04
+ */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class E2eFlowTest {

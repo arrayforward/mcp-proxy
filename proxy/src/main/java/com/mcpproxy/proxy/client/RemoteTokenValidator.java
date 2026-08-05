@@ -7,6 +7,16 @@ import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 
+/**
+ * TokenValidator 的远程实现。
+ *
+ * <p>功能：调用统一认证服务（mock: auth-validator-mock）的 {@code POST /api/validate/token}。
+ *
+ * <p>开发思路：fail-safe——校验服务不可达时返回 valid=false（reason=validator-unreachable），
+ * 让上层统一按 401 处理，而不是把内部异常抛给 Agent。
+ *
+ * @author hubin
+ */
 @Component
 public class RemoteTokenValidator implements TokenValidator {
 
@@ -16,6 +26,16 @@ public class RemoteTokenValidator implements TokenValidator {
         this.restClient = RestClient.create(validatorUrl);
     }
 
+    /**
+     * 远程校验 token。
+     *
+     * <p>伪代码：
+     * <pre>
+     *   POST {validator}/api/validate/token {token}
+     *   响应 valid==true -> (true, uid, instanceId, null)
+     *   响应 valid==false/空响应/异常 -> (false, null, null, reason)
+     * </pre>
+     */
     @Override
     @SuppressWarnings("unchecked")
     public ValidationResult validate(String token) {

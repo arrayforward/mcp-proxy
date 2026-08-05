@@ -8,11 +8,44 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * mock MCP 协议处理器（无传输层逻辑，纯 JSON-RPC -> JSON-RPC）。
+ *
+ * <p>功能：处理 initialize / ping / tools/list / tools/call / notifications，
+ * 被 McpController（streamable-http）与 SseController（SSE /message）两个传输入口复用。
+ *
+ * <p>开发思路：
+ * <ul>
+ *   <li>工具集 = mcp_mobile_use 13 个（含 adb_shell）+ 阿里云 AgentBay sandbox 13 个，
+ *       与 docs/external-api.md §1.1 的映射一致；</li>
+ *   <li>tools/call 对 sandbox 生命周期/UI 元素等工具返回结构化 JSON 文本，
+ *       模拟真实云机行为（如 get_all_ui_elements 走 adb_shell + uiautomator dump 的产出）；</li>
+ *   <li>通知类（notifications/*）返回 null，由传输层翻译成 202。</li>
+ * </ul>
+ *
+ * @author hubin
+ * @since 2026-08-04
+ */
 @Service
 public class McpMockService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 处理一条 JSON-RPC 消息。
+     *
+     * <p>伪代码：
+     * <pre>
+     *   method 以 notifications/ 开头 -> return null（通知无响应）
+     *   initialize -> 回显 protocolVersion + capabilities + serverInfo(mcp-mock)
+     *   ping       -> {}
+     *   tools/list -> 26 个工具定义
+     *   tools/call -> {content:[{type:text, text: 按工具名生成的结果}], isError:false}
+     *   其它       -> error -32601 Method not found
+     * </pre>
+     *
+     * @return 响应 map；通知类返回 null
+     */
     public Map<String, Object> handle(JsonNode request) {
         String method = request.path("method").asText("");
         if (method.startsWith("notifications/")) {
@@ -40,6 +73,37 @@ public class McpMockService {
         return response;
     }
 
+    /**
+     * 按工具名生成 mock 执行结果（tools/call 的 content.text）。
+     *
+     * <p>sandbox 生命周期、shell/UI 元素等返回结构化 JSON 字符串，模拟真实云机输出；
+     * 其余工具返回 "mock {name} ok"。
+     */
+    private String toolCallResult(String name, JsonNode args) {
+        return switch (name) {
+            case "create_sandbox" -> "{\"sandbox_id\":\"sandbox-mock-0001\"}";
+            case "get_sandbox_url" -> "{\"url\":\"http://127.0.0.1:9091/mcp?ticket=single-use-mock\"}";
+            case "kill_sandbox" -> "{\"released\":true}";
+            case "system_screenshot" -> "{\"url\":\"http://127.0.0.1:9091/shots/mock.png\",\"expires_in\":3840}";
+            case "shell" -> "{\"exit_code\":0,\"output\":\"mock shell ok: " + args.path("command").asText("") + "\"}";
+            case "adb_shell" -> "{\"command\":\"" + args.path("command").asText("") + "\",\"exit_code\":0,\"timed_out\":false,\"stdout\":\"mock adb_shell ok\",\"stderr\":\"\"}";
+            // UI 元素类：模拟 adb_shell 执行 uiautomator dump 后解析出的元素树
+            case "get_all_ui_elements" -> "{\"source\":\"adb_shell:uiautomator dump /sdcard/window.xml\",\"elements\":["
+                    + "{\"text\":\"\",\"resource_id\":\"com.android.systemui:id/status_bar\",\"class\":\"android.widget.FrameLayout\",\"package\":\"com.android.systemui\",\"bounds\":[0,0,1080,96],\"clickable\":false,\"enabled\":true},"
+                    + "{\"text\":\"设置\",\"resource_id\":\"com.android.settings:id/title\",\"class\":\"android.widget.TextView\",\"package\":\"com.android.settings\",\"bounds\":[48,200,1032,320],\"clickable\":false,\"enabled\":true},"
+                    + "{\"text\":\"确定\",\"resource_id\":\"android:id/button1\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[800,1700,1032,1820],\"clickable\":true,\"enabled\":true},"
+                    + "{\"text\":\"取消\",\"resource_id\":\"android:id/button2\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[560,1700,792,1820],\"clickable\":true,\"enabled\":true}]}";
+            // 可点击子集：在 get_all 结果上过滤 clickable=true
+            case "get_clickable_ui_elements" -> "{\"source\":\"adb_shell:uiautomator dump /sdcard/window.xml\",\"elements\":["
+                    + "{\"text\":\"确定\",\"resource_id\":\"android:id/button1\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[800,1700,1032,1820],\"clickable\":true,\"enabled\":true},"
+                    + "{\"text\":\"取消\",\"resource_id\":\"android:id/button2\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[560,1700,792,1820],\"clickable\":true,\"enabled\":true}]}";
+            case "get_installed_apps" -> "{\"apps\":[{\"name\":\"MockApp\",\"start_cmd\":\"monkey -p com.mock.app -c android.intent.category.LAUNCHER 1\"}]}";
+            case "start_app" -> "{\"processes\":[{\"name\":\"com.mock.app\",\"pid\":12345}]}";
+            default -> "mock " + name + " ok";
+        };
+    }
+
+    /** 完整工具表：13 个 mcp_mobile_use 工具 + 13 个 AgentBay sandbox 工具 */
     private List<Map<String, Object>> tools() {
         List<Map<String, Object>> tools = new java.util.ArrayList<>(List.of(
                 tool("tap", "Tap screen at coordinates", schema(Map.of(
@@ -75,6 +139,7 @@ public class McpMockService {
         return tools;
     }
 
+    /** AgentBay sandbox 兼容工具集（云手机 = sandbox，见 external-api.md §1.1） */
     private List<Map<String, Object>> sandboxTools() {
         return List.of(
                 tool("create_sandbox", "Create a new AgentBay sandbox and return its ID", schema(Map.of(), List.of())),
@@ -94,9 +159,9 @@ public class McpMockService {
                         "button", Map.of("type", "string", "description", "left/middle/right, default left")), List.of("x", "y", "button"))),
                 tool("send_key", "Send a key. Android: 3:HOME,4:BACK,24:VOLUME_UP,25:VOLUME_DOWN,26:POWER,82:MENU", schema(Map.of(
                         "key", Map.of("type", "integer", "description", "client send key")), List.of("key"))),
-                tool("get_all_ui_elements", "Get all UI elements from the device with timeout", schema(Map.of(
+                tool("get_all_ui_elements", "Get all UI elements from the device with timeout (via adb_shell + uiautomator dump)", schema(Map.of(
                         "timeout_ms", Map.of("type", "integer", "default", 1000)), List.of("timeout_ms"))),
-                tool("get_clickable_ui_elements", "Get all clickable UI elements within timeout", schema(Map.of(
+                tool("get_clickable_ui_elements", "Get all clickable UI elements within timeout (clickable=true subset)", schema(Map.of(
                         "timeout_ms", Map.of("type", "integer", "default", 1000)), List.of("timeout_ms"))),
                 tool("get_installed_apps", "Retrieve installed applications with optional filters", schema(Map.of(
                         "desktop", Map.of("type", "boolean", "default", false),
@@ -110,28 +175,6 @@ public class McpMockService {
                         "stop_cmd", Map.of("type", "string")), List.of("stop_cmd"))),
                 tool("input_text", "Input text", schema(Map.of(
                         "text", Map.of("type", "string", "description", "client input text")), List.of("text"))));
-    }
-
-    private String toolCallResult(String name, JsonNode args) {
-        return switch (name) {
-            case "create_sandbox" -> "{\"sandbox_id\":\"sandbox-mock-0001\"}";
-            case "get_sandbox_url" -> "{\"url\":\"http://127.0.0.1:9091/mcp?ticket=single-use-mock\"}";
-            case "kill_sandbox" -> "{\"released\":true}";
-            case "system_screenshot" -> "{\"url\":\"http://127.0.0.1:9091/shots/mock.png\",\"expires_in\":3840}";
-            case "shell" -> "{\"exit_code\":0,\"output\":\"mock shell ok: " + args.path("command").asText("") + "\"}";
-            case "adb_shell" -> "{\"command\":\"" + args.path("command").asText("") + "\",\"exit_code\":0,\"timed_out\":false,\"stdout\":\"mock adb_shell ok\",\"stderr\":\"\"}";
-            case "get_installed_apps" -> "{\"apps\":[{\"name\":\"MockApp\",\"start_cmd\":\"monkey -p com.mock.app -c android.intent.category.LAUNCHER 1\"}]}";
-            case "start_app" -> "{\"processes\":[{\"name\":\"com.mock.app\",\"pid\":12345}]}";
-            case "get_all_ui_elements" -> "{\"source\":\"adb_shell:uiautomator dump /sdcard/window.xml\",\"elements\":["
-                    + "{\"text\":\"\",\"resource_id\":\"com.android.systemui:id/status_bar\",\"class\":\"android.widget.FrameLayout\",\"package\":\"com.android.systemui\",\"bounds\":[0,0,1080,96],\"clickable\":false,\"enabled\":true},"
-                    + "{\"text\":\"设置\",\"resource_id\":\"com.android.settings:id/title\",\"class\":\"android.widget.TextView\",\"package\":\"com.android.settings\",\"bounds\":[48,200,1032,320],\"clickable\":false,\"enabled\":true},"
-                    + "{\"text\":\"确定\",\"resource_id\":\"android:id/button1\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[800,1700,1032,1820],\"clickable\":true,\"enabled\":true},"
-                    + "{\"text\":\"取消\",\"resource_id\":\"android:id/button2\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[560,1700,792,1820],\"clickable\":true,\"enabled\":true}]}";
-            case "get_clickable_ui_elements" -> "{\"source\":\"adb_shell:uiautomator dump /sdcard/window.xml\",\"elements\":["
-                    + "{\"text\":\"确定\",\"resource_id\":\"android:id/button1\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[800,1700,1032,1820],\"clickable\":true,\"enabled\":true},"
-                    + "{\"text\":\"取消\",\"resource_id\":\"android:id/button2\",\"class\":\"android.widget.Button\",\"package\":\"com.android.settings\",\"bounds\":[560,1700,792,1820],\"clickable\":true,\"enabled\":true}]}";
-            default -> "mock " + name + " ok";
-        };
     }
 
     private Map<String, Object> tool(String name, String description, Map<String, Object> inputSchema) {
