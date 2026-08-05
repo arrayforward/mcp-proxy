@@ -9,6 +9,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpMockServiceTest {
 
@@ -29,14 +30,42 @@ class McpMockServiceTest {
     }
 
     @Test
-    void toolsListReturnsTwelveTools() throws Exception {
+    void toolsListReturnsAllTools() throws Exception {
         var request = mapper.readTree("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
         Map<String, Object> response = service.handle(request);
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>) response.get("result");
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> tools = (List<Map<String, Object>>) result.get("tools");
-        assertEquals(12, tools.size());
+        assertEquals(26, tools.size());
+        assertTrue(tools.stream().anyMatch(t -> "create_sandbox".equals(t.get("name"))));
+        assertTrue(tools.stream().anyMatch(t -> "kill_sandbox".equals(t.get("name"))));
+        assertTrue(tools.stream().anyMatch(t -> "adb_shell".equals(t.get("name"))));
+    }
+
+    @Test
+    void sandboxLifecycleCalls() throws Exception {
+        var create = mapper.readTree("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"create_sandbox\",\"arguments\":{}}}");
+        Map<String, Object> resp = service.handle(create);
+        assertNotNull(resp.get("result"));
+
+        var getUrl = mapper.readTree("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"get_sandbox_url\",\"arguments\":{\"sandbox_id\":\"sandbox-mock-0001\"}}}");
+        assertNotNull(service.handle(getUrl).get("result"));
+
+        var kill = mapper.readTree("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"kill_sandbox\",\"arguments\":{\"sandbox_id\":\"sandbox-mock-0001\"}}}");
+        assertNotNull(service.handle(kill).get("result"));
+    }
+
+    @Test
+    void adbShellCall() throws Exception {
+        var request = mapper.readTree("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"adb_shell\",\"arguments\":{\"command\":\"getprop ro.build.version.release\"}}}");
+        Map<String, Object> resp = service.handle(request);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) resp.get("result");
+        assertNotNull(result);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> content = (List<Map<String, Object>>) result.get("content");
+        assertTrue(((String) content.get(0).get("text")).contains("getprop ro.build.version.release"));
     }
 
     @Test

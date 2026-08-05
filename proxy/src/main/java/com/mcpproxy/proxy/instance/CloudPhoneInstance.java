@@ -68,6 +68,9 @@ public class CloudPhoneInstance {
     @Column(name = "mcp_port")
     private Integer mcpPort;
 
+    @Column(name = "healthy", nullable = false)
+    private boolean healthy;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -227,6 +230,14 @@ public class CloudPhoneInstance {
 
     public void setMcpPort(Integer mcpPort) {
         this.mcpPort = mcpPort;
+    }
+
+    public boolean isHealthy() {
+        return healthy;
+    }
+
+    public void setHealthy(boolean healthy) {
+        this.healthy = healthy;
     }
 
     public LocalDateTime getCreatedAt() {

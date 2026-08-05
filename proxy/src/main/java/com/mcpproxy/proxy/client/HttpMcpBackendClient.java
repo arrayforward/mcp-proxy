@@ -50,6 +50,20 @@ public class HttpMcpBackendClient implements McpBackendClient {
     }
 
     @Override
+    public boolean healthCheck(String backendBaseUrl) {
+        try {
+            return restClient.get()
+                    .uri(backendBaseUrl + "/healthz")
+                    .retrieve()
+                    .toBodilessEntity()
+                    .getStatusCode()
+                    .is2xxSuccessful();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @Override
     public void proxySse(String backendBaseUrl, String instanceId, SseEmitter emitter) {
         executor.submit(() -> {
             try {

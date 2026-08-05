@@ -1,6 +1,7 @@
 package com.mcpproxy.proxy.config;
 
 import com.mcpproxy.proxy.client.McpBackendClient;
+import com.mcpproxy.proxy.health.ActivityTracker;
 import com.mcpproxy.proxy.route.RouteService;
 import com.mcpproxy.proxy.security.JwtService;
 import com.mcpproxy.proxy.service.InstanceService;
@@ -18,20 +19,23 @@ public class WebSocketConfig implements WebSocketConfigurer {
     private final InstanceService instanceService;
     private final RouteService routeService;
     private final McpBackendClient backendClient;
+    private final ActivityTracker activityTracker;
 
     public WebSocketConfig(JwtService jwtService,
                            InstanceService instanceService,
                            RouteService routeService,
-                           McpBackendClient backendClient) {
+                           McpBackendClient backendClient,
+                           ActivityTracker activityTracker) {
         this.jwtService = jwtService;
         this.instanceService = instanceService;
         this.routeService = routeService;
         this.backendClient = backendClient;
+        this.activityTracker = activityTracker;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(new McpWebSocketHandler(jwtService, instanceService, routeService, backendClient),
+        registry.addHandler(new McpWebSocketHandler(jwtService, instanceService, routeService, backendClient, activityTracker),
                         "/ws/mcp/{instanceId}")
                 .setAllowedOrigins("*");
     }

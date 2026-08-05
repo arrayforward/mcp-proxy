@@ -159,6 +159,49 @@ class E2eFlowTest {
         Map<String, Object> listData = (Map<String, Object>) listResp.get("data");
         List<Map<String, Object>> list = (List<Map<String, Object>>) listData.get("instance_list");
         assertEquals("127.0.0.1", list.get(0).get("mcp_ip"));
+        assertEquals(Boolean.TRUE, list.get(0).get("healthy"));
+    }
+
+    @Test
+    @Order(3)
+    void healthzCheckKeepsInstanceAlive() {
+        var healthCheckService = proxyApp.getBean(com.mcpproxy.proxy.health.HealthCheckService.class);
+        var activityTracker = proxyApp.getBean(com.mcpproxy.proxy.health.ActivityTracker.class);
+        activityTracker.recordRequest(instanceId);
+        assertTrue(activityTracker.isActive(instanceId));
+        assertTrue(healthCheckService.checkOne(instanceId), "healthz should pass against mcp-mock");
+    }
+
+    @Test
+    @Order(3)
+    @SuppressWarnings("unchecked")
+    void sandboxToolsForwardedThroughProxy() throws Exception {
+        loginIfNeeded();
+        Map<?, ?> createResp = http.post().uri(proxyBase + "/mcp/" + instanceId)
+                .header("Authorization", "Bearer " + jwt)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\",\"params\":{\"name\":\"create_sandbox\",\"arguments\":{}}}")
+                .retrieve().body(Map.class);
+        String text = mapper.writeValueAsString(createResp);
+        assertTrue(text.contains("sandbox-mock-0001"), "create_sandbox result: " + text);
+
+        Map<?, ?> adbResp = http.post().uri(proxyBase + "/mcp/" + instanceId)
+                .header("Authorization", "Bearer " + jwt)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"tools/call\",\"params\":{\"name\":\"adb_shell\",\"arguments\":{\"command\":\"ls /sdcard\"}}}")
+                .retrieve().body(Map.class);
+        assertTrue(mapper.writeValueAsString(adbResp).contains("ls /sdcard"), "adb_shell result forwarded");
+    }
+
+    private void loginIfNeeded() {
+        if (jwt == null) {
+            String token = issueToken(UID, instanceId);
+            Map<?, ?> loginResp = http.post().uri(proxyBase + "/api/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("token", token))
+                    .retrieve().body(Map.class);
+            jwt = (String) loginResp.get("accessToken");
+        }
     }
 
     @Test
@@ -189,7 +232,7 @@ class E2eFlowTest {
                 .body("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}")
                 .retrieve().body(Map.class);
         Map<String, Object> toolsResult = (Map<String, Object>) toolsResp.get("result");
-        assertEquals(12, ((List<?>) toolsResult.get("tools")).size());
+        assertEquals(26, ((List<?>) toolsResult.get("tools")).size());
 
         Map<?, ?> callResp = http.post().uri(proxyBase + "/mcp/" + instanceId)
                 .header("Authorization", "Bearer " + jwt)

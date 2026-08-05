@@ -10,4 +10,6 @@ public interface InstanceRepository extends JpaRepository<CloudPhoneInstance, St
     List<CloudPhoneInstance> findByUid(String uid);
 
     List<CloudPhoneInstance> findByUidAndInstanceIdIn(String uid, Collection<String> instanceIds);
+
+    List<CloudPhoneInstance> findByStatus(int status);
 }

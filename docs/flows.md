@@ -173,6 +173,24 @@
 | 订阅请求体缺必填 | 400 KOOPHONE.API.1000 |
 | 重复订阅 | 每台新实例重新生成 instanceId |
 
+## 6.1 健康检查闭环（v1.2 新增）
+
+```
+  就绪判活（prepare-progress 归零时）:
+    waitingCount==0 ──▶ fetchAccessInfo 落库 ──▶ GET /healthz ──▶ 活: NORMAL + healthy=true
+                                                                └─▶ 死: FAILED + healthy=false
+
+  活跃期探活（每 30s, @Scheduled）:
+    遍历 status==NORMAL 的实例
+        │
+        ▼
+    活跃?（SSE/WS 长连接数>0 或 3min 内有 MCP 请求）── 否 ──▶ 跳过
+        │ 是
+        ▼
+    GET http://{mcp_ip}:{mcp_port}/healthz
+        │ 2xx ──▶ healthy=true    │ 超时/非2xx ──▶ healthy=false
+```
+
 ## 7. 路由解析流程（Redis 缓存，v1.2 新增）
 
 ```
@@ -206,3 +224,5 @@
 | Mock MCP 服务 | McpMockServiceTest | E2E 间接覆盖 |
 | access-info 落库 + Redis 缓存 | —（真实 MySQL/Redis） | E2eFlowTest#accessInfoPersistedToMysql |
 | JWT 签发/验签 | JwtServiceTest | E2E 全流程 |
+| healthz 判活 + 活跃期探活 | — | E2eFlowTest#healthzCheckKeepsInstanceAlive |
+| sandbox/adb_shell 工具转发 | McpMockServiceTest | E2eFlowTest#sandboxToolsForwardedThroughProxy |

@@ -87,6 +87,7 @@
 | `backend_token` | varchar(256) | 转发到云机的静态令牌 |
 | `mcp_ip` | varchar(64) | 云手机 IP（E4 接口获取后落库） |
 | `mcp_port` | int | 云机内 MCP 服务端口（E4 接口获取后落库） |
+| `healthy` | tinyint(1) | 健康标记：就绪时 healthz 判活写入；活跃期每 30s 探活更新 |
 | `created_at` | datetime | 创建时间 |
 | `updated_at` | datetime | 更新时间 |
 
@@ -112,6 +113,7 @@ CREATE TABLE t_cloud_phone_instance (
   backend_token  VARCHAR(256),
   mcp_ip         VARCHAR(64),
   mcp_port       INT,
+  healthy        TINYINT(1)   NOT NULL DEFAULT 0,
   created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_uid (uid)
@@ -175,6 +177,8 @@ CREATE TABLE t_cloud_phone_instance (
 | ADR-6 | exchange 仅凭旧 JWT（有效且未过期）续签同 uid/instanceId 的新 30min JWT |
 | ADR-7 | E4 访问信息（ip/port）获取后先落 MySQL，再写 Redis 30min 滑动缓存；转发只读 `RouteService` |
 | ADR-8 | 模块命名 proxy（非 gateway）；三个应用同 JVM 测试时用 profile 配置文件隔离（application-proxy/mock/validator.yml） |
+| ADR-9 | 云手机 ≈ sandbox（对齐阿里云 AgentBay Mobile Use）：create/kill/get_sandbox_url 语义映射 CreateInstance/DeleteInstance/access-info |
+| ADR-10 | 健康闭环：就绪时 `healthz` 判活（死 → FAILED）；SSE/WS 长连接或 3min 内有 MCP 请求 → 每 30s 探活并更新 `healthy` |
 
 ## 7. 实例状态机（ASCII）
 

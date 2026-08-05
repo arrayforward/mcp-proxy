@@ -1,6 +1,7 @@
 package com.mcpproxy.proxy.service;
 
 import com.mcpproxy.proxy.client.KooPhoneClient;
+import com.mcpproxy.proxy.client.McpBackendClient;
 import com.mcpproxy.proxy.instance.CloudPhoneInstance;
 import com.mcpproxy.proxy.instance.InstanceRepository;
 import com.mcpproxy.proxy.instance.InstanceStatus;
@@ -24,13 +25,16 @@ public class InstanceService {
 
     private final InstanceRepository repository;
     private final KooPhoneClient kooPhoneClient;
+    private final McpBackendClient backendClient;
     private final String proxyBaseUrl;
 
     public InstanceService(InstanceRepository repository,
                            KooPhoneClient kooPhoneClient,
+                           McpBackendClient backendClient,
                            @Value("${mcp.proxy-base-url:http://localhost:8080}") String proxyBaseUrl) {
         this.repository = repository;
         this.kooPhoneClient = kooPhoneClient;
+        this.backendClient = backendClient;
         this.proxyBaseUrl = proxyBaseUrl;
     }
 
@@ -110,11 +114,13 @@ public class InstanceService {
             int remaining = entity.getWaitingCount() - 1;
             entity.setWaitingCount(Math.max(remaining, 0));
             if (remaining <= 0) {
-                entity.setStatus(InstanceStatus.NORMAL);
                 KooPhoneClient.AccessInfo accessInfo = kooPhoneClient.fetchAccessInfo(instanceId);
                 entity.setMcpIp(accessInfo.ip());
                 entity.setMcpPort(accessInfo.mcpPort());
                 entity.setBackendUrl("http://" + accessInfo.ip() + ":" + accessInfo.mcpPort());
+                boolean alive = backendClient.healthCheck(entity.getBackendUrl());
+                entity.setHealthy(alive);
+                entity.setStatus(alive ? InstanceStatus.NORMAL : InstanceStatus.FAILED);
             }
             repository.save(entity);
         }
@@ -145,6 +151,7 @@ public class InstanceService {
         map.put("mcp_url", entity.getMcpUrl());
         map.put("mcp_ip", entity.getMcpIp());
         map.put("mcp_port", entity.getMcpPort());
+        map.put("healthy", entity.isHealthy());
         map.put("region_id", entity.getRegionId());
         map.put("os", entity.getOs());
         map.put("order_id", entity.getOrderId());

@@ -2,6 +2,7 @@ package com.mcpproxy.proxy.web;
 
 import com.mcpproxy.proxy.client.BackendException;
 import com.mcpproxy.proxy.client.McpBackendClient;
+import com.mcpproxy.proxy.health.ActivityTracker;
 import com.mcpproxy.proxy.instance.CloudPhoneInstance;
 import com.mcpproxy.proxy.instance.InstanceStatus;
 import com.mcpproxy.proxy.route.RouteInfo;
@@ -21,19 +22,24 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
 
     private static final String ATTR_BACKEND_BASE_URL = "backendBaseUrl";
 
+    private static final String ATTR_INSTANCE_ID = "instanceId";
+
     private final JwtService jwtService;
     private final InstanceService instanceService;
     private final RouteService routeService;
     private final McpBackendClient backendClient;
+    private final ActivityTracker activityTracker;
 
     public McpWebSocketHandler(JwtService jwtService,
                                InstanceService instanceService,
                                RouteService routeService,
-                               McpBackendClient backendClient) {
+                               McpBackendClient backendClient,
+                               ActivityTracker activityTracker) {
         this.jwtService = jwtService;
         this.instanceService = instanceService;
         this.routeService = routeService;
         this.backendClient = backendClient;
+        this.activityTracker = activityTracker;
     }
 
     @Override
@@ -55,14 +61,28 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
             }
             RouteInfo route = routeService.resolveRoute(instanceId);
             session.getAttributes().put(ATTR_BACKEND_BASE_URL, route.backendBaseUrl());
+            session.getAttributes().put(ATTR_INSTANCE_ID, instanceId);
+            activityTracker.connectionOpened(instanceId);
         } catch (Exception e) {
             session.close(CloseStatus.POLICY_VIOLATION);
         }
     }
 
     @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        String instanceId = (String) session.getAttributes().get(ATTR_INSTANCE_ID);
+        if (instanceId != null) {
+            activityTracker.connectionClosed(instanceId);
+        }
+    }
+
+    @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String backendBaseUrl = (String) session.getAttributes().get(ATTR_BACKEND_BASE_URL);
+        String instanceId = (String) session.getAttributes().get(ATTR_INSTANCE_ID);
+        if (instanceId != null) {
+            activityTracker.recordRequest(instanceId);
+        }
         try {
             String response = backendClient.forwardPost(backendBaseUrl, message.getPayload());
             if (response != null && session.isOpen()) {

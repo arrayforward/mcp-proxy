@@ -1,6 +1,7 @@
 package com.mcpproxy.proxy.web;
 
 import com.mcpproxy.proxy.client.McpBackendClient;
+import com.mcpproxy.proxy.health.ActivityTracker;
 import com.mcpproxy.proxy.instance.CloudPhoneInstance;
 import com.mcpproxy.proxy.instance.InstanceStatus;
 import com.mcpproxy.proxy.route.RouteInfo;
@@ -24,13 +25,16 @@ public class McpProxyController {
     private final InstanceService instanceService;
     private final RouteService routeService;
     private final McpBackendClient backendClient;
+    private final ActivityTracker activityTracker;
 
     public McpProxyController(InstanceService instanceService,
                               RouteService routeService,
-                              McpBackendClient backendClient) {
+                              McpBackendClient backendClient,
+                              ActivityTracker activityTracker) {
         this.instanceService = instanceService;
         this.routeService = routeService;
         this.backendClient = backendClient;
+        this.activityTracker = activityTracker;
     }
 
     @PostMapping(value = "/mcp/{instanceId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -38,6 +42,7 @@ public class McpProxyController {
                                       @RequestBody String body,
                                       Authentication authentication) {
         checkAccess(instanceId, authentication);
+        activityTracker.recordRequest(instanceId);
         RouteInfo route = routeService.resolveRoute(instanceId);
         String response = backendClient.forwardPost(route.backendBaseUrl(), body);
         if (response == null) {
@@ -49,8 +54,12 @@ public class McpProxyController {
     @GetMapping("/mcp/{instanceId}/sse")
     public SseEmitter sse(@PathVariable String instanceId, Authentication authentication) {
         checkAccess(instanceId, authentication);
+        activityTracker.connectionOpened(instanceId);
         RouteInfo route = routeService.resolveRoute(instanceId);
         SseEmitter emitter = new SseEmitter(0L);
+        emitter.onCompletion(() -> activityTracker.connectionClosed(instanceId));
+        emitter.onTimeout(() -> activityTracker.connectionClosed(instanceId));
+        emitter.onError(e -> activityTracker.connectionClosed(instanceId));
         backendClient.proxySse(route.backendBaseUrl(), instanceId, emitter);
         return emitter;
     }
@@ -61,6 +70,7 @@ public class McpProxyController {
                                         @RequestBody String body,
                                         Authentication authentication) {
         checkAccess(instanceId, authentication);
+        activityTracker.recordRequest(instanceId);
         RouteInfo route = routeService.resolveRoute(instanceId);
         backendClient.forwardMessage(route.backendBaseUrl(), sessionId, body);
         return ResponseEntity.accepted().build();

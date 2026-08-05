@@ -312,7 +312,16 @@ POST /api/validate/token
 | `POST /mcp` | streamable-http：initialize / ping / tools/list / tools/call / notifications |
 | `GET /sse` | SSE 会话建立，下发 endpoint |
 | `POST /message?sessionId=` | 提交消息，202，SSE 回推 |
+| `GET /healthz` | 判活：200 `{ "status": "UP" }`（proxy 就绪判活 + 活跃期 30s 探活调用） |
 
-tools/list 返回 12 个工具（与 `mcp_mobile_use` 对齐）：
-`tap`、`swipe`、`take_screenshot`、`text_input`、`back`、`home`、`menu`、
-`launch_app`、`close_app`、`list_apps`、`autoinstall_app`、`terminate`
+tools/list 返回 26 个工具：
+
+| 分组 | 工具 |
+|---|---|
+| mcp_mobile_use（13） | `tap`、`swipe`、`take_screenshot`、`text_input`、`back`、`home`、`menu`、`launch_app`、`close_app`、`list_apps`、`autoinstall_app`、`terminate`、`adb_shell` |
+| AgentBay sandbox（13） | `create_sandbox`、`get_sandbox_url`、`kill_sandbox`、`system_screenshot`、`shell`、`click`、`input_text`、`send_key`、`get_all_ui_elements`、`get_clickable_ui_elements`、`get_installed_apps`、`start_app`、`stop_app_by_cmd` |
+
+> `adb_shell`：参数 `command`（必填）、`timeout_ms`（默认 30000），云机通用 shell。
+> `get_all_ui_elements` / `get_clickable_ui_elements`：云机内基于 `adb_shell` 执行
+> `uiautomator dump` 拉取 UI XML 后解析返回元素列表（含 text/resource_id/class/bounds/clickable/enabled），
+> 后者仅保留 `clickable=true` 的元素。

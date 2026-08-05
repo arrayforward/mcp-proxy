@@ -12,6 +12,25 @@
 | E2 | 统一认证/校验服务 | 校验临时 token | proxy | `auth-validator-mock:9092` |
 | E3 | 云手机控制面（KooPhone） | 实例订购类（华为兼容，由 proxy 代理） | proxy | `MockKooPhoneClient`（进程内） |
 | E4 | 云手机控制面（KooPhone） | **按 instanceId 查询云机 IP + MCP 端口** | proxy | `MockKooPhoneClient#fetchAccessInfo` |
+| E5 | 云手机 MCP（mcp_mobile_use） | `GET /healthz` 判活 | proxy（就绪时 + 活跃期每 30s） | `mcp-mock:9091` |
+
+## 1.1 云手机 ≈ Sandbox（阿里云 AgentBay 模型映射）
+
+订阅/退订语义参照阿里云 AgentBay Mobile Use 的 sandbox 模型
+（`https://help.aliyun.com/zh/agentbay/developer-reference/mobile-use-andriod-14`）：
+
+| AgentBay sandbox 工具 | 本项目对应接口 | 语义 |
+|---|---|---|
+| `create_sandbox` | `POST /api/v1/instances/create`（CreateInstance） | 创建云手机沙箱，返回 instanceId（≈ sandbox_id） |
+| `get_sandbox_url` | `POST /api/v1/instances/access-info` | 获取云机访问地址（ip + mcp_port，即 MCP 运行时 URL） |
+| `kill_sandbox` | `POST /api/v1/instances/delete`（DeleteInstance） | 退订，释放云手机资源 |
+| `system_screenshot` | MCP `take_screenshot` 工具 | 截图（经 proxy 转发至云机 MCP） |
+| `shell` | MCP `adb_shell` 工具 | 云机通用 shell（经 proxy 转发） |
+
+云机内 MCP（`mcp_mobile_use`）同时暴露 AgentBay 兼容工具集（click / input_text / send_key /
+get_all_ui_elements / get_clickable_ui_elements / get_installed_apps / start_app / stop_app_by_cmd），
+其中 `get_all_ui_elements` 与 `get_clickable_ui_elements` 在云机内**基于 `adb_shell` 执行
+`uiautomator dump` 拉取 UI 层级 XML 后解析实现**（后者在解析结果上过滤 `clickable=true`）。
 
 ---
 
@@ -157,6 +176,22 @@ ShowProgress 状态码（data.status）：
 | 3 | 每次 MCP 转发命中缓存即**续期** 30 分钟（滑动过期） |
 | 4 | 缓存未命中 → 查 MySQL → 仍无 → 回调本接口获取并重复步骤 1-2 |
 
+## 5.1 E5 云机 MCP 判活接口（healthz）
+
+| 项 | 内容 |
+|---|---|
+| 方法/路径 | `GET /healthz` |
+| 提供方 | 云机内 MCP 服务（mcp_mobile_use，真实）；`mcp-mock`（Mock） |
+| 成功 | HTTP 200，body `{ "status": "UP" }` |
+| 失败 | 非 2xx 或连接超时即判死 |
+
+proxy 调用时机：
+
+| 时机 | 频率 | 判死后行为 |
+|---|---|---|
+| 实例就绪（prepare-progress 归零）时 | 一次 | 判死 → 实例置 FAILED |
+| 用户持有 MCP 长连接（SSE/WS），或最近一次 MCP 请求后 3 分钟内 | 每 30 秒 | 更新 `t_cloud_phone_instance.healthy` |
+
 ## 6. 真实系统对接要求汇总（提需求用）
 
 | # | 需求 | 约束 |
@@ -165,3 +200,5 @@ ShowProgress 状态码（data.status）：
 | R2 | 提供 E4 访问信息查询接口 | 入参 instanceId，出参 ip + mcpPort；实例就绪后必须可查 |
 | R3 | E3 接口保持华为兼容报文 | error_code 体系一致，便于 proxy 无缝切换真实后端 |
 | R4 | 接口可用性 | E4 在 prepare-progress 返回 status=0 之前允许 404/重试，就绪后必须稳定返回 |
+| R5 | 云机 MCP 提供 `GET /healthz` | 2xx 判活；响应时间 < 3s |
+| R6 | 云机 MCP 提供 `adb_shell` 工具 | 参数 `command`（必填）/`timeout_ms`（默认 30000）；UI 元素类工具（get_all/get_clickable_ui_elements）基于 `adb_shell` + `uiautomator dump` 实现 |

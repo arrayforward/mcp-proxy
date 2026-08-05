@@ -9,4 +9,6 @@ public interface McpBackendClient {
     void forwardMessage(String backendBaseUrl, String sessionId, String jsonRpcBody);
 
     void proxySse(String backendBaseUrl, String instanceId, SseEmitter emitter);
+
+    boolean healthCheck(String backendBaseUrl);
 }
