@@ -200,5 +200,6 @@ proxy 调用时机：
 | R2 | 提供 E4 访问信息查询接口 | 入参 instanceId，出参 ip + mcpPort；实例就绪后必须可查 |
 | R3 | E3 接口保持华为兼容报文 | error_code 体系一致，便于 proxy 无缝切换真实后端 |
 | R4 | 接口可用性 | E4 在 prepare-progress 返回 status=0 之前允许 404/重试，就绪后必须稳定返回 |
-| R5 | 云机 MCP 提供 `GET /healthz` | 2xx 判活；响应时间 < 3s |
+| R5 | 云机 MCP 提供 `GET /healthz` | 2xx 判活；响应时间 < 3s；免鉴权 |
 | R6 | 云机 MCP 提供 `adb_shell` 工具 | 参数 `command`（必填）/`timeout_ms`（默认 30000）；UI 元素类工具（get_all/get_clickable_ui_elements）基于 `adb_shell` + `uiautomator dump` 实现 |
+| R7 | 云机 mcp-server 预置 RSA 公钥并验签 | RS256 验签 proxy 签发的用户 JWT（`/mcp`、`/sse`、`/message` 全部要求 `Authorization: Bearer`）；无 token/验签失败/过期 → 401；公钥分发与轮换见 docs/security.md |

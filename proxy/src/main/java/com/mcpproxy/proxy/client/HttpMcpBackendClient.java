@@ -21,12 +21,13 @@ public class HttpMcpBackendClient implements McpBackendClient {
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     @Override
-    public String forwardPost(String backendBaseUrl, String jsonRpcBody) {
+    public String forwardPost(String backendBaseUrl, String jsonRpcBody, String userJwt) {
         try {
             return restClient.post()
                     .uri(backendBaseUrl + "/mcp")
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Bearer " + userJwt)
                     .body(jsonRpcBody)
                     .retrieve()
                     .body(String.class);
@@ -36,11 +37,12 @@ public class HttpMcpBackendClient implements McpBackendClient {
     }
 
     @Override
-    public void forwardMessage(String backendBaseUrl, String sessionId, String jsonRpcBody) {
+    public void forwardMessage(String backendBaseUrl, String sessionId, String jsonRpcBody, String userJwt) {
         try {
             restClient.post()
                     .uri(backendBaseUrl + "/message?sessionId=" + sessionId)
                     .contentType(MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Bearer " + userJwt)
                     .body(jsonRpcBody)
                     .retrieve()
                     .toBodilessEntity();
@@ -64,10 +66,12 @@ public class HttpMcpBackendClient implements McpBackendClient {
     }
 
     @Override
-    public void proxySse(String backendBaseUrl, String instanceId, SseEmitter emitter) {
+    public void proxySse(String backendBaseUrl, String instanceId, SseEmitter emitter, String userJwt) {
         executor.submit(() -> {
             try {
-                HttpRequest request = HttpRequest.newBuilder(URI.create(backendBaseUrl + "/sse")).GET().build();
+                HttpRequest request = HttpRequest.newBuilder(URI.create(backendBaseUrl + "/sse"))
+                        .header("Authorization", "Bearer " + userJwt)
+                        .GET().build();
                 HttpResponse<Stream<String>> response = httpClient.send(request, HttpResponse.BodyHandlers.ofLines());
                 String event = null;
                 StringBuilder data = new StringBuilder();

@@ -55,13 +55,23 @@ class E2eFlowTest {
     private String instanceId;
     private String jwt;
 
+    private String mockBase;
+
     @BeforeAll
-    void startAll() {
+    void startAll() throws Exception {
+        java.security.KeyPairGenerator keyGen = java.security.KeyPairGenerator.getInstance("RSA");
+        keyGen.initialize(2048);
+        java.security.KeyPair keyPair = keyGen.generateKeyPair();
+        String privateKeyB64 = java.util.Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
+        String publicKeyB64 = java.util.Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
+
         validatorApp = new SpringApplicationBuilder(ValidatorApplication.class)
                 .run("--spring.profiles.active=validator", "--server.port=0");
         mockApp = new SpringApplicationBuilder(MockMcpApplication.class)
-                .run("--spring.profiles.active=mock", "--server.port=0");
+                .run("--spring.profiles.active=mock", "--server.port=0",
+                        "--mcp.auth.public-key=" + publicKeyB64);
         int mockPort = portOf(mockApp);
+        mockBase = "http://localhost:" + mockPort;
         proxyApp = new SpringApplicationBuilder(ProxyApplication.class)
                 .run(
                         "--spring.profiles.active=proxy",
@@ -73,7 +83,8 @@ class E2eFlowTest {
                         "--spring.data.redis.port=6379",
                         "--koophone.validator-url=http://localhost:" + portOf(validatorApp),
                         "--koophone.mock.mcp-port=" + mockPort,
-                        "--koophone.mock.phone-ip=127.0.0.1");
+                        "--koophone.mock.phone-ip=127.0.0.1",
+                        "--security.jwt.private-key=" + privateKeyB64);
         validatorBase = "http://localhost:" + portOf(validatorApp);
         proxyBase = "http://localhost:" + portOf(proxyApp);
     }
@@ -191,6 +202,18 @@ class E2eFlowTest {
                 .body("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"tools/call\",\"params\":{\"name\":\"adb_shell\",\"arguments\":{\"command\":\"ls /sdcard\"}}}")
                 .retrieve().body(Map.class);
         assertTrue(mapper.writeValueAsString(adbResp).contains("ls /sdcard"), "adb_shell result forwarded");
+    }
+
+    @Test
+    @Order(3)
+    void cloudPhoneMcpRejectsRequestWithoutJwt() {
+        var resp = http.post().uri(mockBase + "/mcp")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"ping\"}")
+                .retrieve()
+                .onStatus(s -> s.value() == 401, (req, res) -> { })
+                .toBodilessEntity();
+        assertEquals(401, resp.getStatusCode().value(), "cloud phone mcp-server must reject requests without JWT");
     }
 
     private void loginIfNeeded() {

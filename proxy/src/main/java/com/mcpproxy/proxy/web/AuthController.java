@@ -5,6 +5,7 @@ import com.mcpproxy.proxy.security.JwtService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -44,6 +45,22 @@ public class AuthController {
         } catch (JwtException | IllegalArgumentException e) {
             return ResponseEntity.status(401).body(Map.of("error", "invalid token"));
         }
+    }
+
+    @GetMapping("/public-key")
+    public ResponseEntity<Map<String, Object>> publicKey() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("publicKey", jwtService.publicKeyBase64());
+        body.put("pem", jwtService.publicKeyPem());
+        body.put("alg", "RS256");
+        return ResponseEntity.ok(body);
+    }
+
+    @GetMapping("/jwks")
+    public ResponseEntity<Map<String, Object>> jwks() {
+        Map<String, Object> keys = new LinkedHashMap<>();
+        keys.put("keys", java.util.List.of(jwtService.publicKeyJwk()));
+        return ResponseEntity.ok(keys);
     }
 
     private Map<String, Object> tokenBody(String uid, String instanceId) {

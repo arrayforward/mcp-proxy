@@ -4,3 +4,7 @@ server:
 spring:
   application:
     name: mcp-mock
+
+mcp:
+  auth:
+    public-key: ${MCP_JWT_PUBLIC_KEY:}

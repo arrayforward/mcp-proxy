@@ -144,7 +144,7 @@ CREATE TABLE t_cloud_phone_instance (
 | 本地/生产/E2E | MySQL 8.x（`JDBC_URL` / `JDBC_USER` / `JDBC_PASSWORD` 环境变量覆盖；本地默认 `jdbc:mysql://localhost:3306/mcpproxy`，root/root） |
 | Redis | `REDIS_HOST` / `REDIS_PORT`（默认 localhost:6379） |
 
-## 4. JWT 载荷（HS256，有效期 30 分钟）
+## 4. JWT 载荷（RS256，有效期 30 分钟）
 
 ```json
 {
@@ -162,8 +162,7 @@ CREATE TABLE t_cloud_phone_instance (
 | 令牌 | 有效期 | 签发方 | 用途 |
 |---|---|---|---|
 | 临时 token | 10 秒 | 外部校验服务（Mock：`/api/token/issue`） | 登录、实例管理 API 的 `x-auth-token` |
-| 访问 JWT | 30 分钟 | 网关 `JwtService` | MCP 代理请求 `Authorization: Bearer <jwt>` |
-| 后端静态 token | 长期 | 配置/落库 | 网关 → 云机 MCP 转发 |
+| 访问 JWT（RS256） | 30 分钟 | proxy `JwtService`（私钥签发） | Agent→proxy；**proxy→云机转发原样携带，云机 mcp-server 用预置公钥验签**（详见 security.md） |
 
 ## 6. 设计决策（ADR）
 
@@ -179,6 +178,7 @@ CREATE TABLE t_cloud_phone_instance (
 | ADR-8 | 模块命名 proxy（非 gateway）；三个应用同 JVM 测试时用 profile 配置文件隔离（application-proxy/mock/validator.yml） |
 | ADR-9 | 云手机 ≈ sandbox（对齐阿里云 AgentBay Mobile Use）：create/kill/get_sandbox_url 语义映射 CreateInstance/DeleteInstance/access-info |
 | ADR-10 | 健康闭环：就绪时 `healthz` 判活（死 → FAILED）；SSE/WS 长连接或 3min 内有 MCP 请求 → 每 30s 探活并更新 `healthy` |
+| ADR-11 | JWT 改 RS256：proxy 持私钥签发，每台云机 mcp-server 预置公钥验签；转发请求原样携带用户 JWT（见 security.md） |
 
 ## 7. 实例状态机（ASCII）
 

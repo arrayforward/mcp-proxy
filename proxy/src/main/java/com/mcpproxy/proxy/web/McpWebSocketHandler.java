@@ -23,6 +23,7 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
     private static final String ATTR_BACKEND_BASE_URL = "backendBaseUrl";
 
     private static final String ATTR_INSTANCE_ID = "instanceId";
+    private static final String ATTR_USER_JWT = "userJwt";
 
     private final JwtService jwtService;
     private final InstanceService instanceService;
@@ -62,6 +63,7 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
             RouteInfo route = routeService.resolveRoute(instanceId);
             session.getAttributes().put(ATTR_BACKEND_BASE_URL, route.backendBaseUrl());
             session.getAttributes().put(ATTR_INSTANCE_ID, instanceId);
+            session.getAttributes().put(ATTR_USER_JWT, token);
             activityTracker.connectionOpened(instanceId);
         } catch (Exception e) {
             session.close(CloseStatus.POLICY_VIOLATION);
@@ -84,7 +86,8 @@ public class McpWebSocketHandler extends TextWebSocketHandler {
             activityTracker.recordRequest(instanceId);
         }
         try {
-            String response = backendClient.forwardPost(backendBaseUrl, message.getPayload());
+            String userJwt = (String) session.getAttributes().get(ATTR_USER_JWT);
+            String response = backendClient.forwardPost(backendBaseUrl, message.getPayload(), userJwt);
             if (response != null && session.isOpen()) {
                 session.sendMessage(new TextMessage(response));
             }

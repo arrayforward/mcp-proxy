@@ -41,10 +41,10 @@ public class McpProxyController {
     public ResponseEntity<String> mcp(@PathVariable String instanceId,
                                       @RequestBody String body,
                                       Authentication authentication) {
-        checkAccess(instanceId, authentication);
+        AuthUser user = checkAccess(instanceId, authentication);
         activityTracker.recordRequest(instanceId);
         RouteInfo route = routeService.resolveRoute(instanceId);
-        String response = backendClient.forwardPost(route.backendBaseUrl(), body);
+        String response = backendClient.forwardPost(route.backendBaseUrl(), body, user.token());
         if (response == null) {
             return ResponseEntity.accepted().build();
         }
@@ -53,14 +53,14 @@ public class McpProxyController {
 
     @GetMapping("/mcp/{instanceId}/sse")
     public SseEmitter sse(@PathVariable String instanceId, Authentication authentication) {
-        checkAccess(instanceId, authentication);
+        AuthUser user = checkAccess(instanceId, authentication);
         activityTracker.connectionOpened(instanceId);
         RouteInfo route = routeService.resolveRoute(instanceId);
         SseEmitter emitter = new SseEmitter(0L);
         emitter.onCompletion(() -> activityTracker.connectionClosed(instanceId));
         emitter.onTimeout(() -> activityTracker.connectionClosed(instanceId));
         emitter.onError(e -> activityTracker.connectionClosed(instanceId));
-        backendClient.proxySse(route.backendBaseUrl(), instanceId, emitter);
+        backendClient.proxySse(route.backendBaseUrl(), instanceId, emitter, user.token());
         return emitter;
     }
 
@@ -69,14 +69,14 @@ public class McpProxyController {
                                         @RequestParam String sessionId,
                                         @RequestBody String body,
                                         Authentication authentication) {
-        checkAccess(instanceId, authentication);
+        AuthUser user = checkAccess(instanceId, authentication);
         activityTracker.recordRequest(instanceId);
         RouteInfo route = routeService.resolveRoute(instanceId);
-        backendClient.forwardMessage(route.backendBaseUrl(), sessionId, body);
+        backendClient.forwardMessage(route.backendBaseUrl(), sessionId, body, user.token());
         return ResponseEntity.accepted().build();
     }
 
-    private void checkAccess(String instanceId, Authentication authentication) {
+    private AuthUser checkAccess(String instanceId, Authentication authentication) {
         AuthUser user = (AuthUser) authentication.getPrincipal();
         if (!user.instanceId().equals(instanceId)) {
             throw new ApiException(403, "KOOPHONE.API.1001", "token does not match instance: " + instanceId);
@@ -85,5 +85,6 @@ public class McpProxyController {
         if (entity.getStatus() != InstanceStatus.NORMAL) {
             throw new ApiException(409, "KOOPHONE.API.5002", "instance not ready: " + instanceId);
         }
+        return user;
     }
 }
